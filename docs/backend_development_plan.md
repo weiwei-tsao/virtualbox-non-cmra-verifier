@@ -181,8 +181,30 @@ ALLOWED_ORIGINS=https://your-vercel-app.vercel.app
 
 ### 7\. Implementation Roadmap (MVP)
 
-1.  **Phase 1: Setup:** Init Go module, Firestore connection, and basic Router.
-2.  **Phase 2: Scraper Kernel:** Implement ATMB scraping with GoColly or basic HTML parsing.
-3.  **Phase 3: Database & Hashing:** Implement the `MailboxesRepo` with Batch Upsert and Hash logic.
+1.  **Phase 1: Setup & Foundation:** Init Go module, Firestore connection, and basic Router.
+
+    - [ ] Initialize Go module and scaffold the clean layout from `docs/backend_development_plan.md` (`cmd/server`, `internal/{platform,business,repository}`, `pkg/{model,util}`) matching Firestore data models from the PRD.
+    - [ ] Add config loader for env vars (`PORT`, `FIREBASE*PROJECT_ID`, `FIREBASE_CREDS_BASE64`, `SMARTY_*`, `ALLOWED_ORIGINS`, `GIN_MODE`) with dual Firestore auth modes: local JSON file vs base64 env.
+    - [ ] Implement Firestore client bootstrap in `internal/platform/firestore` with context handling and verify connection in a minimal server start.
+    - [ ] Define `pkg/model` structs for `mailboxes`, `crawl_runs`, and `system/stats` including fields like `dataHash`, `active`, `standardizedAddress`, stats schema.
+
+2.  **Phase 2: Scraper Kernel & Hashing:** Implement ATMB scraping with GoColly or basic HTML parsing.
+    - [ ] Create `testdata/sample_page.html` and a parser unit test to assert extracted `name/address/price/link` shape.
+    - [ ] Build scraper (`GoColly` or `net/html`) to crawl state pages then detail pages, normalizing data to the mailbox model.
+    - [ ] Add `MD5` hashing utility in `pkg/util` for name + addressRaw, and wire hash computation into scrape results.
+    - [ ] Implement repository batch upsert (400–500 per batch) and in-memory lookup map keyed by link to reuse existing CMRA/RDI.
+    - [ ] Wire initial flow: scrape → hash compare → write to Firestore with `crawlRunId` and `active=true`.
+3.  **Phase 3: Crawler Orchestration**
+    - [ ] Implement worker pool (5–10 workers) with context-aware cancellation/shutdown and backoff for scraper errors.
+    - [ ] Load existing mailboxes into memory map at run start; mark new/updated items; accumulate stats counters for found/skipped/validated/failed.
+    - [ ] Add mark-and-sweep pass to set `active=false` where `crawlRunId != currentRunId`.
+          Track run lifecycle in `crawl_runs` via repository: `runId`, status transitions, timestamps, counters.
 4.  **Phase 4: Smarty Integration:** Connect Smarty API with the circuit breaker.
+    - [ ] Build Smarty client wrapper with auth/host config, 3x retry, and account rotation hooks; support `SMARTY_MOCK` short-circuit for local dev.
+    - [ ] Implement circuit breaker that pauses/halts validation after 5 consecutive 402/429 while allowing scraping to continue.
+    - [ ] Integrate into pipeline: on hash mismatch or missing CMRA/RDI, call Smarty, merge standardized address, update `lastValidatedAt`, and record validation stats.
 5.  **Phase 5: API & UI Integration:** Connect React frontend to the endpoints.
+    - [ ] Implement handlers (`/api/crawl/run`, `/api/crawl/status`, `/api/stats`, `/api/mailboxes`, `/api/mailboxes/export`) using `Gin/Fiber` with CORS; export uses streaming iterator + `csv.Writer` flush every ~50 rows.
+    - [ ] Add `/healthz` for Render probes; ensure pagination/filtering on mailboxes (state/cmra/rdi/active).
+    - [ ] Precompute and store `system/stats` document after each crawl; ensure indexes (`active+state`, `active+rdi`, `crawlRunId`) are defined.
+    - [ ] Provide Render build/start commands and README notes (env examples, `SMARTY_MOCK` usage, keep-alive polling guidance).
