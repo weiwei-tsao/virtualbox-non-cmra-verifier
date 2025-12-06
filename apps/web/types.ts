@@ -1,0 +1,48 @@
+export interface StandardizedAddress {
+  deliveryLine1: string;
+  lastLine: string;
+}
+
+export interface Mailbox {
+  id: string;
+  name: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  price: number;
+  link: string;
+  cmra: 'Y' | 'N' | 'Unknown';
+  rdi: 'Residential' | 'Commercial' | 'Unknown';
+  standardizedAddress?: StandardizedAddress;
+  lastValidatedAt: string;
+  crawlRunId: string;
+}
+
+export interface CrawlRun {
+  id: string;
+  startedAt: string;
+  finishedAt?: string;
+  status: 'running' | 'success' | 'failed';
+  totalFound: number;
+  totalValidated: number;
+  totalFailed: number;
+  errorsSample: Array<{ link: string; reason: string }>;
+}
+
+export interface MailboxFilter {
+  state?: string;
+  cmra?: 'Y' | 'N';
+  rdi?: 'Residential' | 'Commercial';
+  search?: string;
+  page: number;
+  pageSize: number;
+}
+
+export interface Stats {
+  totalMailboxes: number;
+  commercialCount: number;
+  residentialCount: number;
+  avgPrice: number;
+  byState: { name: string; value: number }[];
+}

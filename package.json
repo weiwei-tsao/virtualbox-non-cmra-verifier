@@ -1,0 +1,17 @@
+{
+  "name": "virtualbox-verifier",
+  "private": true,
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:web": "pnpm --filter web dev",
+    "dev:api": "cd apps/api && go run ./cmd/server",
+    "dev": "concurrently \"pnpm dev:web\" \"pnpm dev:api\"",
+    "build:web": "pnpm --filter web build"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.0"
+  }
+}
+

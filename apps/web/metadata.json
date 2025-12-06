@@ -1,0 +1,5 @@
+{
+  "name": "US Virtual Address Verifier",
+  "description": "A comprehensive dashboard for managing and verifying US virtual addresses using AnytimeMailbox data and Smarty validation logic.",
+  "requestFramePermissions": []
+}
