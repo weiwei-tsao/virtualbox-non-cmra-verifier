@@ -1,68 +1,188 @@
-## Backend Development Plan (MVP, Layered Design)
+# US Virtual Address Verification System
 
-### Goals
-- Minimal-effort MVP that unblocks the existing React UI.
-- Clean layering: handler → service → repository/client.
-- Runs on Render free tier; Firestore as primary store; Smarty for validation.
+## Backend Architecture & Implementation Plan (v2.0)
 
-### Scope (must-have for UI)
-- Mailbox listing with filters/pagination/search.
-- Stats for totals/commercial/residential/byState/avgPrice.
-- CSV export of mailboxes.
-- Trigger crawl job + view recent crawl runs/status/errors.
+### 1\. Architectural Goals
 
-### Architecture & Folders
-```
+- **Zero-Cost Operation:** Optimized for Render (Go) and Firebase (NoSQL) free tiers.
+- **Smarty API Conservation:** Aggressive caching and hashing strategies to minimize expensive API calls.
+- **Resiliency:** Graceful handling of scraper blocks, API rate limits, and Render's ephemeral instance lifecycle.
+
+### 2\. Project Structure (Refined)
+
+Adopts a standard "Clean Architecture" layout to separate infrastructure from business logic.
+
+```text
 backend/
-  cmd/server/main.go      # Bootstrap, DI, HTTP server, routes, config
+  cmd/
+    server/
+      main.go           # Entry point: Env loader, DI, Router setup
   internal/
-    handler/              # HTTP handlers (Gin/Fiber)
-    service/              # Business logic
-    repository/           # Firestore persistence
-    client/               # Smarty API, ATMB scraper
-    job/                  # Crawl job orchestration
+    platform/           # Infrastructure & 3rd Party Clients
+      firestore/        # DB initialization & raw client
+      smarty/           # Smarty SDK wrapper (with rotation/retry logic)
+      http/             # Web server config (Gin/Fiber)
+    business/           # Core Logic
+      crawler/          # Scraper logic, Worker Pools, Orchestration
+      mailbox/          # CRUD service for mailboxes
+      stats/            # Logic for aggregating and reading stats
+    repository/         # DB Data Access Layer
+      mailbox_repo.go
+      run_repo.go
+      stats_repo.go
   pkg/
-    model/                # Shared structs (Mailbox, CrawlRun, filters)
-    logger/               # Logging helpers
+    model/              # Structs & Entities
+    util/               # Hashing, CSV streaming helpers
 ```
 
-### Data Models (align with frontend)
-- `Mailbox`: id, name, street, city, state, zip, price (number), link, cmra ("Y"/"N"), rdi ("Residential"/"Commercial"), standardizedAddress { deliveryLine1, lastLine }, lastValidatedAt (ISO string), crawlRunId.
-- `CrawlRun`: id, startedAt, finishedAt, status ("running"|"success"|"failed"), totalFound, totalValidated, totalFailed, errorsSample[] (link, reason).
-- `StatsResponse`: totalMailboxes, commercialCount, residentialCount, avgPrice, byState[{ name, value }].
+### 3\. Data Models (Firestore)
 
-### Repositories (Firestore)
-- `MailboxesRepo`: List(filter, pagination, search), UpsertBatch(mailboxes), ExportStream(writer).
-- `CrawlRunsRepo`: Create(run), Update(run fields), ListRecent(limit).
-- Index guidance: state+city, cmra+rdi, crawlRunId.
+#### 3.1 Collection: `mailboxes`
 
-### Clients
-- `SmartyClient`: ValidateAddress(raw) -> standardizedAddress, cmra, rdi. Include rate limiting + retry (3) + optional multi-key rotation.
-- `AtmbScraper`: Fetch state listings + detail pages; yields raw mailbox candidates.
+Changes: Added `dataHash` for change detection and `active` for soft deletion.
 
-### Services
-- `MailboxService`: orchestrates list/search, stats aggregation, export streaming.
-- `CrawlService`: orchestrates crawl job: scrape → normalize → dedupe → validate via Smarty → upsert; updates CrawlRunsRepo for progress/final status.
-- `StatsService`: derive stats from Firestore (or from MailboxesRepo aggregation).
+```json
+{
+  "id": "auto-gen-id",
+  "name": "ABC Store",
+  "addressRaw": {
+    "street": "123 Main St",
+    "city": "Dover",
+    "state": "DE",
+    "zip": "19901"
+  },
+  "price": 12.99,
+  "link": "https://anytimemailbox.com/...",
+  // Validation Data
+  "cmra": "Y",
+  "rdi": "Commercial",
+  "standardizedAddress": { ... },
+  // Metadata
+  "dataHash": "a1b2c3d4...", // MD5 of name + addressRaw
+  "lastValidatedAt": "2025-01-01T12:00:00Z",
+  "crawlRunId": "RUN_101",
+  "active": true // Set to false if not found in current crawl
+}
+```
 
-### HTTP API (match frontend expectations)
-- `GET /api/mailboxes?page=&pageSize=&state=&cmra=&rdi=&search=` -> `{ items, total, page }`
-- `GET /api/stats` -> stats payload used by Analytics page.
-- `GET /api/mailboxes/export` -> CSV stream.
-- `POST /api/crawl/run` -> `{ runId }` (starts background job, return immediately).
-- `GET /api/crawl/status` -> list of recent runs with status/errorsSample/timestamps.
-- CORS: allow Vercel origin; JSON error envelope.
+#### 3.2 Collection: `crawl_runs`
 
-### Background Job Strategy (MVP-friendly)
-- Single active crawl at a time; queue a new request by returning last active runId if running.
-- Worker pool with bounded concurrency for scraping + validation; backoff on Smarty errors.
-- Periodic progress writes to `crawl_runs` so restarts are visible (no full resume needed for MVP).
+Tracks the lifecycle of the background job.
 
-### Config & Deployment
-- Env vars: `PORT`, `FIREBASE_PROJECT_ID`, `FIREBASE_CREDS_B64`, `SMARTY_KEYS` (comma), `ALLOWED_ORIGIN`.
-- Dockerfile (multi-stage) for Render; health endpoint `/healthz`.
-- `.env.example` documenting required variables.
+```json
+{
+  "runId": "RUN_101",
+  "status": "running", // running, success, failed, partial_halt
+  "stats": {
+    "found": 2300,
+    "validated": 50, // Actually called Smarty
+    "skipped": 2250, // Skipped due to matching Hash
+    "failed": 0
+  },
+  "startedAt": "...",
+  "finishedAt": "..."
+}
+```
 
-### Testing
-- Unit tests: SmartyClient (httpmock), repositories (Firestore emulator), services with fakes.
-- Basic integration: start server against emulator, hit `/api/mailboxes` and `/api/stats`.
+#### 3.3 Document: `system/stats` (Singleton)
+
+**Critical for Free Tier:** Pre-calculated stats to avoid reading 2000+ docs for every dashboard refresh.
+
+```json
+{
+  "lastUpdated": "2025-01-01T12:05:00Z",
+  "totalMailboxes": 2300,
+  "totalCommercial": 1500,
+  "totalResidential": 800,
+  "avgPrice": 14.50,
+  "byState": { "CA": 200, "DE": 500, ... }
+}
+```
+
+---
+
+### 4\. Core Business Logic
+
+#### 4.1 The "Smart" Crawler Service
+
+To solve the "Smarty Cost" and "Data Consistency" problems, the crawler will follow this pipeline:
+
+1.  **Initialization:** Generate `runId`. Fetch all existing mailboxes into a memory map (Key: Link, Value: Hash + ValidatedData) for quick lookup.
+2.  **Scraping (Worker Pool):**
+    - Limit concurrency to **5-10 workers** to prevent Render OOM (Out of Memory).
+    - Scrape ATMB details.
+3.  **Hash Comparison (The Cost Saver):**
+    - Compute Hash of scraped name + address.
+    - **IF** Hash matches existing DB record **AND** existing record has valid CMRA data:
+      - **Skip Smarty.** Use existing CMRA/RDI data. Mark as "Skipped" in stats.
+    - **ELSE:**
+      - Send to `SmartyClient` for validation.
+4.  **Circuit Breaker:**
+    - If Smarty returns `402` (Payment Required) or `429` (Too Many Requests) \> 5 times consecutively, **pause** the validation phase but continue scraping (marking items as unvalidated) or halt entirely.
+5.  **Batch Write:**
+    - Write to Firestore in batches of 400-500 items to reduce network overhead.
+6.  **Mark-and-Sweep:**
+    - After scraping finishes, run a query: `UPDATE mailboxes SET active = false WHERE crawlRunId != currentRunId`. This handles "delisted" stores.
+7.  **Pre-Aggregation:**
+    - Calculate all dashboard stats (counts, averages) in memory.
+    - Overwrite `system/stats` document.
+
+#### 4.2 CSV Streaming Export
+
+To prevent memory spikes when exporting data:
+
+- **Do not** load all documents into a slice.
+- Use `firestore.Query.Documents(ctx)` iterator.
+- Wrap `http.ResponseWriter` in a `csv.NewWriter`.
+- Flush the buffer every 50 rows to keep the connection alive.
+
+---
+
+### 5\. API Design (REST)
+
+| Method   | Endpoint                | Purpose           | Notes                                                                 |
+| :------- | :---------------------- | :---------------- | :-------------------------------------------------------------------- |
+| **GET**  | `/api/mailboxes`        | List addresses    | Supports paging, filtering (`active=true` by default).                |
+| **GET**  | `/api/stats`            | Dashboard metrics | **Reads only 1 document** (`system/stats`).                           |
+| **GET**  | `/api/mailboxes/export` | Download CSV      | Uses stream processing.                                               |
+| **POST** | `/api/crawl/run`        | Start Job         | Asynchronous. Returns `{ runId }` immediately.                        |
+| **GET**  | `/api/crawl/status`     | Job Status        | Front-end must poll this every 30s-60s to keep Render instance awake. |
+
+---
+
+### 6\. Deployment & Configuration
+
+#### 6.1 Render (Go Service)
+
+- **Build Command:** `go build -o server cmd/server/main.go`
+- **Start Command:** `./server`
+- **Keep-Alive Strategy:** The React frontend "Status Page" will poll `/api/crawl/status` periodically. This prevents Render from spinning down the service during a long crawl job.
+
+#### 6.2 Firestore Indexes (required via `firestore.indexes.json`)
+
+- `active` (Asc) + `state` (Asc)
+- `active` (Asc) + `rdi` (Asc)
+- `crawlRunId` (Asc)
+
+#### 6.3 Environment Variables
+
+```bash
+PORT=8080
+GIN_MODE=release
+# Firebase
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CREDS_BASE64=... # Base64 encoded service account JSON
+# Smarty
+SMARTY_AUTH_ID=...
+SMARTY_AUTH_TOKEN=...
+# Security
+ALLOWED_ORIGINS=https://your-vercel-app.vercel.app
+```
+
+### 7\. Implementation Roadmap (MVP)
+
+1.  **Phase 1: Setup:** Init Go module, Firestore connection, and basic Router.
+2.  **Phase 2: Scraper Kernel:** Implement ATMB scraping with GoColly or basic HTML parsing.
+3.  **Phase 3: Database & Hashing:** Implement the `MailboxesRepo` with Batch Upsert and Hash logic.
+4.  **Phase 4: Smarty Integration:** Connect Smarty API with the circuit breaker.
+5.  **Phase 5: API & UI Integration:** Connect React frontend to the endpoints.
