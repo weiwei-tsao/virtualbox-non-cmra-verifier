@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/repository"
@@ -54,8 +55,15 @@ func (s *Service) Start(ctx context.Context, links []string) (string, error) {
 }
 
 func (s *Service) execute(ctx context.Context, runID string, links []string, startedAt time.Time) {
-	// If links look like listing pages, attempt discovery.
-	if len(links) == len(s.seedLinks) {
+	// If links look like listing pages (/l/usa or /l/usa/xx), attempt discovery even if seeds are empty.
+	needsDiscovery := false
+	for _, l := range links {
+		if strings.Contains(l, "/l/usa") {
+			needsDiscovery = true
+			break
+		}
+	}
+	if needsDiscovery {
 		if discovered, err := DiscoverLinks(ctx, s.fetcher, links); err == nil && len(discovered) > 0 {
 			links = discovered
 		}
