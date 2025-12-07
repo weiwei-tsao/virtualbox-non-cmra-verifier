@@ -3,6 +3,7 @@ package crawler
 import (
 	"context"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -55,6 +56,20 @@ func (s *Service) Start(ctx context.Context, links []string) (string, error) {
 }
 
 func (s *Service) execute(ctx context.Context, runID string, links []string, startedAt time.Time) {
+	status := "running"
+	stats := model.CrawlRunStats{}
+
+	// Always finalize the run document, even on panic.
+	defer func() {
+		if rec := recover(); rec != nil {
+			status = "failed"
+			log.Printf("crawl panic run %s: %v", runID, rec)
+		}
+		if err := FinishRun(ctx, s.runs, runID, stats, status, startedAt); err != nil {
+			log.Printf("finish run %s: %v", runID, err)
+		}
+	}()
+
 	// If links look like listing pages (/l/usa or /l/usa/xx), attempt discovery even if seeds are empty.
 	needsDiscovery := false
 	for _, l := range links {
@@ -69,8 +84,8 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 		}
 	}
 
-	stats := model.CrawlRunStats{Found: len(links)}
-	status := "success"
+	stats = model.CrawlRunStats{Found: len(links)}
+	status = "success"
 
 	progress := func(curr ScrapeStats) {
 		// Update run in Firestore periodically.
@@ -91,6 +106,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 	scrapeStats, err := ScrapeAndUpsert(ctx, s.fetcher, s.mailboxes, s.validator, links, runID, progress)
 	if err != nil {
 		status = "failed"
+		log.Printf("scrape error run %s: %v", runID, err)
 	}
 	stats.Found = scrapeStats.Found
 	stats.Skipped = scrapeStats.Skipped
@@ -99,6 +115,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 
 	if err := MarkAndSweep(ctx, s.mailboxes, runID); err != nil {
 		status = "partial_halt"
+		log.Printf("mark and sweep error run %s: %v", runID, err)
 	}
 
 	all, err := s.mailboxes.FetchAllMap(ctx)
@@ -109,10 +126,12 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 		}
 		sort.Slice(list, func(i, j int) bool { return list[i].Link < list[j].Link })
 		sysStats := AggregateSystemStats(list)
-		_ = s.statsRepo.SaveSystemStats(ctx, sysStats)
+		if err := s.statsRepo.SaveSystemStats(ctx, sysStats); err != nil {
+			log.Printf("save system stats error run %s: %v", runID, err)
+		}
+	} else {
+		log.Printf("fetch all mailboxes error run %s: %v", runID, err)
 	}
-
-	_ = FinishRun(ctx, s.runs, runID, stats, status, startedAt)
 }
 
 func generateRunID() string {
