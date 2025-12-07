@@ -89,6 +89,19 @@ export const api = {
       errorsSample: data.errorsSample || [],
     };
   },
+
+  getCrawlRuns: async (): Promise<CrawlRun[]> => {
+    const res = await request(`/api/crawl/runs?ts=${Date.now()}`);
+    const data = await res.json();
+    return (data.items || []).map((run: any) => ({
+      id: run.runId,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      status: run.status,
+      stats: run.stats || { found: 0, validated: 0, skipped: 0, failed: 0 },
+      errorsSample: run.errorsSample || [],
+    }));
+  },
   
   exportCSV: async () => {
     const url = `${API_BASE}/api/mailboxes/export`;

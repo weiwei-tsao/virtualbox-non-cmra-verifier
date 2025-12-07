@@ -45,6 +45,7 @@ func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepo
 		api.GET("/stats", r.getStats)
 		api.POST("/crawl/run", r.startCrawl)
 		api.GET("/crawl/status", r.getCrawlStatus)
+		api.GET("/crawl/runs", r.listCrawlRuns)
 	}
 
 	return router
@@ -179,4 +180,13 @@ func (r *Router) getCrawlStatus(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, run)
+}
+
+func (r *Router) listCrawlRuns(c *gin.Context) {
+	runs, err := r.runs.ListRuns(c.Request.Context(), 20)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": runs})
 }

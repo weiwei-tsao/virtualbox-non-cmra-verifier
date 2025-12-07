@@ -6,6 +6,7 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
+	"google.golang.org/api/iterator"
 )
 
 // RunRepository manages crawl run lifecycle records.
@@ -53,4 +54,28 @@ func (r *RunRepository) GetRun(ctx context.Context, runID string) (model.CrawlRu
 		return model.CrawlRun{}, fmt.Errorf("decode run %s: %w", runID, err)
 	}
 	return run, nil
+}
+
+// ListRuns returns recent crawl runs ordered by startedAt descending.
+func (r *RunRepository) ListRuns(ctx context.Context, limit int) ([]model.CrawlRun, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	iter := r.client.Collection("crawl_runs").OrderBy("startedAt", firestore.Desc).Limit(limit).Documents(ctx)
+	var runs []model.CrawlRun
+	for {
+		snap, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("list runs: %w", err)
+		}
+		var run model.CrawlRun
+		if err := snap.DataTo(&run); err != nil {
+			return nil, fmt.Errorf("decode run %s: %w", snap.Ref.ID, err)
+		}
+		runs = append(runs, run)
+	}
+	return runs, nil
 }
