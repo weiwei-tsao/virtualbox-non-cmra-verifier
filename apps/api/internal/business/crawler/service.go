@@ -51,7 +51,12 @@ func (s *Service) Start(ctx context.Context, links []string) (string, error) {
 	if err := StartRun(ctx, s.runs, runID, startTime); err != nil {
 		return "", err
 	}
-	go s.execute(context.Background(), runID, links, startTime)
+	// Guard long-running crawls to avoid stuck runs.
+	runCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	go func() {
+		defer cancel()
+		s.execute(runCtx, runID, links, startTime)
+	}()
 	return runID, nil
 }
 
@@ -116,6 +121,11 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 	if err := MarkAndSweep(ctx, s.mailboxes, runID); err != nil {
 		status = "partial_halt"
 		log.Printf("mark and sweep error run %s: %v", runID, err)
+	}
+
+	// If nothing was processed successfully, mark as failed.
+	if stats.Validated == 0 && stats.Skipped == 0 && stats.Found > 0 && stats.Failed >= stats.Found {
+		status = "failed"
 	}
 
 	all, err := s.mailboxes.FetchAllMap(ctx)

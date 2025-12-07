@@ -40,6 +40,11 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 
 	var toSave []model.Mailbox
 	for _, link := range links {
+		select {
+		case <-ctx.Done():
+			return stats, ctx.Err()
+		default:
+		}
 		body, err := fetcher.Fetch(ctx, link)
 		if err != nil {
 			stats.Failed++
