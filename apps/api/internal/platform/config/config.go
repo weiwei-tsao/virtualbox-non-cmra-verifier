@@ -20,6 +20,7 @@ type Config struct {
 	SmartyAuthToken     string
 	SmartyMock          bool
 	AllowedOrigins      string
+	CrawlLinkSeeds      []string
 }
 
 // Load reads environment variables into a Config with sensible defaults.
@@ -33,6 +34,7 @@ func Load() (Config, error) {
 		SmartyAuthID:        strings.TrimSpace(os.Getenv("SMARTY_AUTH_ID")),
 		SmartyAuthToken:     strings.TrimSpace(os.Getenv("SMARTY_AUTH_TOKEN")),
 		AllowedOrigins:      strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS")),
+		CrawlLinkSeeds:      splitCSV(os.Getenv("CRAWL_LINK_SEEDS")),
 	}
 
 	mock, err := parseBoolEnv("SMARTY_MOCK", false)
@@ -97,4 +99,15 @@ func parseBoolEnv(key string, defaultVal bool) (bool, error) {
 		return false, err
 	}
 	return parsed, nil
+}
+
+func splitCSV(val string) []string {
+	parts := strings.Split(val, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }

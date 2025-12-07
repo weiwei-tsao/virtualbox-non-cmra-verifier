@@ -18,9 +18,10 @@ type Service struct {
 	runs      *repository.RunRepository
 	statsRepo *repository.StatsRepository
 	workerCnt int
+	seedLinks []string
 }
 
-func NewService(fetcher HTMLFetcher, validator ValidationClient, mailboxes *repository.MailboxRepository, runs *repository.RunRepository, statsRepo *repository.StatsRepository, workerCnt int) *Service {
+func NewService(fetcher HTMLFetcher, validator ValidationClient, mailboxes *repository.MailboxRepository, runs *repository.RunRepository, statsRepo *repository.StatsRepository, workerCnt int, seedLinks []string) *Service {
 	if workerCnt <= 0 {
 		workerCnt = 5
 	}
@@ -31,13 +32,17 @@ func NewService(fetcher HTMLFetcher, validator ValidationClient, mailboxes *repo
 		runs:      runs,
 		statsRepo: statsRepo,
 		workerCnt: workerCnt,
+		seedLinks: seedLinks,
 	}
 }
 
 // Start kicks off a crawl run asynchronously.
 func (s *Service) Start(ctx context.Context, links []string) (string, error) {
 	if len(links) == 0 {
-		return "", fmt.Errorf("no links provided to crawl")
+		links = s.seedLinks
+	}
+	if len(links) == 0 {
+		return "", fmt.Errorf("no links provided to crawl (set CRAWL_LINK_SEEDS or pass links in request)")
 	}
 	runID := generateRunID()
 	if err := StartRun(ctx, s.runs, runID); err != nil {

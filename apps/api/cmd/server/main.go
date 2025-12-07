@@ -53,7 +53,7 @@ func main() {
 		AuthToken: cfg.SmartyAuthToken,
 		Mock:      cfg.SmartyMock,
 	})
-	crawlService := crawler.NewService(fetcher, validator, mailboxRepo, runRepo, statsRepo, 5)
+	crawlService := crawler.NewService(fetcher, validator, mailboxRepo, runRepo, statsRepo, 5, cfg.CrawlLinkSeeds)
 
 	router := apirouter.NewRouter(mailboxRepo, runRepo, statsRepo, crawlService, cfg.AllowedOrigins)
 

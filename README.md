@@ -100,6 +100,8 @@ SMARTY_MOCK=true
 CRAWLER_CONCURRENCY=5
 # Smarty 调用重试次数
 SMARTY_MAX_RETRIES=3
+# 可选：默认的详情页链接列表（逗号分隔），若启动任务未传 links 时使用
+CRAWL_LINK_SEEDS=https://anytimemailbox.com/locations/abc-store
 EOF
 
 env $(cat .env.local | xargs) go run ./cmd/server
