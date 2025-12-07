@@ -57,7 +57,8 @@ func ParseMailboxHTML(r io.Reader, sourceLink string) (model.Mailbox, error) {
 
 	price, err := parsePrice(priceRaw)
 	if err != nil {
-		return model.Mailbox{}, fmt.Errorf("parse price: %w", err)
+		// Some pages omit price; treat as zero instead of failing the record.
+		price = 0
 	}
 
 	link := sourceLink
