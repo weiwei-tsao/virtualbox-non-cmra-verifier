@@ -11,8 +11,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/crawler"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/config"
 	firestoreclient "github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/firestore"
+	apirouter "github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/http"
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/smarty"
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/repository"
 )
 
 func main() {
@@ -27,11 +31,6 @@ func main() {
 	}
 
 	gin.SetMode(cfg.GinMode)
-	router := gin.New()
-	router.Use(gin.Logger(), gin.Recovery())
-	router.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "ok"})
-	})
 
 	firestoreClient, credsSource, err := firestoreclient.New(ctx, cfg)
 	if err != nil {
@@ -43,6 +42,20 @@ func main() {
 		log.Fatalf("firestore ping: %v", err)
 	}
 	log.Printf("connected to Firestore project %s using %s credentials", cfg.FirebaseProjectID, credsSource)
+
+	mailboxRepo := repository.NewMailboxRepository(firestoreClient)
+	runRepo := repository.NewRunRepository(firestoreClient)
+	statsRepo := repository.NewStatsRepository(firestoreClient)
+
+	fetcher := crawler.NewHTTPFetcher()
+	validator := smarty.New(nil, smarty.Config{
+		AuthID:    cfg.SmartyAuthID,
+		AuthToken: cfg.SmartyAuthToken,
+		Mock:      cfg.SmartyMock,
+	})
+	crawlService := crawler.NewService(fetcher, validator, mailboxRepo, runRepo, statsRepo, 5)
+
+	router := apirouter.NewRouter(mailboxRepo, runRepo, statsRepo, crawlService, cfg.AllowedOrigins)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,

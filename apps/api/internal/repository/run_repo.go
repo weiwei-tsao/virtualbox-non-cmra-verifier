@@ -38,3 +38,19 @@ func (r *RunRepository) UpdateRun(ctx context.Context, run model.CrawlRun) error
 	}
 	return nil
 }
+
+// GetRun returns a crawl run by ID.
+func (r *RunRepository) GetRun(ctx context.Context, runID string) (model.CrawlRun, error) {
+	if runID == "" {
+		return model.CrawlRun{}, fmt.Errorf("runId is required")
+	}
+	snap, err := r.client.Collection("crawl_runs").Doc(runID).Get(ctx)
+	if err != nil {
+		return model.CrawlRun{}, fmt.Errorf("get run %s: %w", runID, err)
+	}
+	var run model.CrawlRun
+	if err := snap.DataTo(&run); err != nil {
+		return model.CrawlRun{}, fmt.Errorf("decode run %s: %w", runID, err)
+	}
+	return run, nil
+}
