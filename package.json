@@ -2,16 +2,15 @@
   "name": "virtualbox-verifier",
   "private": true,
   "workspaces": [
-    "apps/web"
+    "apps/*"
   ],
   "scripts": {
-    "dev:web": "pnpm --filter web dev",
+    "dev:web": "pnpm --filter us-virtual-address-verifier dev",
     "dev:api": "cd apps/api && go run ./cmd/server",
     "dev": "concurrently \"pnpm dev:web\" \"pnpm dev:api\"",
-    "build:web": "pnpm --filter web build"
+    "build:web": "pnpm --filter us-virtual-address-verifier build"
   },
   "devDependencies": {
     "concurrently": "^9.0.0"
   }
 }
-
