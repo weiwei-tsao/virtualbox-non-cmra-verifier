@@ -30,7 +30,7 @@ type ScrapeStats struct {
 }
 
 // ScrapeAndUpsert runs the scrape pipeline: fetch pages, parse, hash, compare, and batch upsert.
-func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStore, validator ValidationClient, links []string, runID string) (ScrapeStats, error) {
+func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStore, validator ValidationClient, links []string, runID string, onProgress func(ScrapeStats)) (ScrapeStats, error) {
 	stats := ScrapeStats{Found: len(links)}
 
 	existing, err := store.FetchAllMap(ctx)
@@ -80,6 +80,10 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 
 		toSave = append(toSave, parsed)
 		stats.Updated++
+
+		if onProgress != nil {
+			onProgress(stats)
+		}
 	}
 
 	if err := store.BatchUpsert(ctx, toSave); err != nil {

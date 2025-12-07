@@ -53,10 +53,33 @@ func (s *Service) Start(ctx context.Context, links []string) (string, error) {
 }
 
 func (s *Service) execute(ctx context.Context, runID string, links []string) {
+	// If links look like listing pages, attempt discovery.
+	if len(links) == len(s.seedLinks) {
+		if discovered, err := DiscoverLinks(ctx, s.fetcher, links); err == nil && len(discovered) > 0 {
+			links = discovered
+		}
+	}
+
 	stats := model.CrawlRunStats{}
 	status := "success"
 
-	scrapeStats, err := ScrapeAndUpsert(ctx, s.fetcher, s.mailboxes, s.validator, links, runID)
+	progress := func(curr ScrapeStats) {
+		// Update run in Firestore periodically.
+		if (curr.Updated+curr.Skipped)%25 == 0 || curr.Updated+curr.Skipped == curr.Found {
+			_ = s.runs.UpdateRun(ctx, model.CrawlRun{
+				RunID:  runID,
+				Status: "running",
+				Stats: model.CrawlRunStats{
+					Found:     curr.Found,
+					Validated: curr.Validated,
+					Skipped:   curr.Skipped,
+					Failed:    curr.Failed,
+				},
+			})
+		}
+	}
+
+	scrapeStats, err := ScrapeAndUpsert(ctx, s.fetcher, s.mailboxes, s.validator, links, runID, progress)
 	if err != nil {
 		status = "failed"
 	}
