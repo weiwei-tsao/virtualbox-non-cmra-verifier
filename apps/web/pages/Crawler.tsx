@@ -28,10 +28,32 @@ export const Crawler: React.FC = () => {
 
   useEffect(() => {
     refresh();
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = window.setInterval(refresh, 5000);
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Only poll when there is a running job.
+  useEffect(() => {
+    const hasRunning = runs.some((r) => r.status === 'running');
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    if (hasRunning) {
+      pollRef.current = window.setInterval(refresh, 5000);
+    }
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runs.some((r) => r.status === 'running')]);
 
   useEffect(() => {
     return () => {
