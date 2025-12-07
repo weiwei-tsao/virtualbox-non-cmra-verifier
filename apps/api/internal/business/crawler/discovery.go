@@ -9,7 +9,7 @@ import (
 )
 
 const baseURL = "https://www.anytimemailbox.com"
-const detailBaseURL = "https://location.anytimemailbox.com"
+const detailBaseURL = "https://www.anytimemailbox.com"
 
 // DiscoverLinks parses listing pages to extract ATMB detail links.
 func DiscoverLinks(ctx context.Context, fetcher HTMLFetcher, seeds []string) ([]string, error) {
