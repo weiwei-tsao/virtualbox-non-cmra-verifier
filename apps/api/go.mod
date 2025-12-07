@@ -5,6 +5,7 @@ go 1.25.3
 require (
 	cloud.google.com/go/firestore v1.20.0
 	github.com/gin-gonic/gin v1.11.0
+	github.com/joho/godotenv v1.5.1
 	google.golang.org/api v0.257.0
 )
 

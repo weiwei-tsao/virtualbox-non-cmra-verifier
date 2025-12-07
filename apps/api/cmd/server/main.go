@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/config"
 	firestoreclient "github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/firestore"
 )
@@ -17,6 +18,8 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	_ = godotenv.Load(".env.local", ".env")
 
 	cfg, err := config.Load()
 	if err != nil {

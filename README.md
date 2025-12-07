@@ -86,7 +86,7 @@ FIREBASE_PROJECT_ID=your-project-id
 # FIREBASE_CREDS_BASE64=
 # [本地开发] 可选：虽然代码会优先找根目录的 service-account.json 文件，
 # 但显式指定路径有时能避免路径错误问题 (需代码支持，若代码硬编码了文件名则忽略此行)
-GOOGLE_APPLICATION_CREDENTIALS=./service-account.json
+FIREBASE_CREDS_FILE=service-account.json
 
 # Smarty Address Verification
 SMARTY_AUTH_ID=your-smarty-id
