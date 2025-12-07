@@ -19,6 +19,9 @@ dist-ssr
 .env.*.local
 !.env.example
 
+# Firebase service account
+apps/api/service-account.json
+
 ### Logs
 *.log
 npm-debug.log*
