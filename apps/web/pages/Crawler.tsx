@@ -13,6 +13,7 @@ export const Crawler: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [runId, setRunId] = useState<string | null>(() => localStorage.getItem('lastRunId'));
+  const pollRef = React.useRef<number | null>(null);
 
   const refresh = async () => {
     if (!runId) return;
@@ -20,6 +21,10 @@ export const Crawler: React.FC = () => {
     try {
       const data = await api.getCrawlStatus(runId);
       setRun(data);
+      if (data.status !== 'running' && pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
     } catch (err) {
       console.error(err);
     } finally {
@@ -29,8 +34,18 @@ export const Crawler: React.FC = () => {
 
   useEffect(() => {
     refresh();
+    if (runId) {
+      if (pollRef.current) clearInterval(pollRef.current);
+      pollRef.current = window.setInterval(refresh, 5000);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
+
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   const handleRun = async () => {
     if (DEFAULT_LINKS.length === 0) {
