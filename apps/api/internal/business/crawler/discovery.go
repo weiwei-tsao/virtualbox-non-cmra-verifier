@@ -2,7 +2,6 @@ package crawler
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -16,12 +15,12 @@ func DiscoverLinks(ctx context.Context, fetcher HTMLFetcher, seeds []string) ([]
 	for _, seed := range seeds {
 		body, err := fetcher.Fetch(ctx, seed)
 		if err != nil {
-			return nil, fmt.Errorf("fetch seed %s: %w", seed, err)
+			continue
 		}
 		doc, err := goquery.NewDocumentFromReader(body)
 		body.Close()
 		if err != nil {
-			return nil, fmt.Errorf("parse seed %s: %w", seed, err)
+			continue
 		}
 		// Country page: find state links
 		stateLinks := extractStateLinks(doc)

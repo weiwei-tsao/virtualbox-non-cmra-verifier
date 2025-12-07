@@ -44,15 +44,16 @@ func (s *Service) Start(ctx context.Context, links []string) (string, error) {
 	if len(links) == 0 {
 		return "", fmt.Errorf("no links provided to crawl (set CRAWL_LINK_SEEDS or pass links in request)")
 	}
+	startTime := time.Now().UTC()
 	runID := generateRunID()
-	if err := StartRun(ctx, s.runs, runID); err != nil {
+	if err := StartRun(ctx, s.runs, runID, startTime); err != nil {
 		return "", err
 	}
-	go s.execute(context.Background(), runID, links)
+	go s.execute(context.Background(), runID, links, startTime)
 	return runID, nil
 }
 
-func (s *Service) execute(ctx context.Context, runID string, links []string) {
+func (s *Service) execute(ctx context.Context, runID string, links []string, startedAt time.Time) {
 	// If links look like listing pages, attempt discovery.
 	if len(links) == len(s.seedLinks) {
 		if discovered, err := DiscoverLinks(ctx, s.fetcher, links); err == nil && len(discovered) > 0 {
@@ -103,7 +104,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string) {
 		_ = s.statsRepo.SaveSystemStats(ctx, sysStats)
 	}
 
-	_ = FinishRun(ctx, s.runs, runID, stats, status)
+	_ = FinishRun(ctx, s.runs, runID, stats, status, startedAt)
 }
 
 func generateRunID() string {

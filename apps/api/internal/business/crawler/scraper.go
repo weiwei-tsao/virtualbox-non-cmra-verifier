@@ -42,12 +42,14 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 	for _, link := range links {
 		body, err := fetcher.Fetch(ctx, link)
 		if err != nil {
-			return stats, fmt.Errorf("fetch %s: %w", link, err)
+			stats.Failed++
+			continue
 		}
 		parsed, err := ParseMailboxHTML(body, link)
 		body.Close()
 		if err != nil {
-			return stats, fmt.Errorf("parse %s: %w", link, err)
+			stats.Failed++
+			continue
 		}
 
 		parsed.DataHash = util.HashMailboxKey(parsed.Name, parsed.AddressRaw)

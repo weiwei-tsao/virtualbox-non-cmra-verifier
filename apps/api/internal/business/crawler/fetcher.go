@@ -25,13 +25,23 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, url string) (io.ReadCloser, err
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	resp, err := f.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("fetch url %s: %w", url, err)
-	}
-	if resp.StatusCode != http.StatusOK {
+	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		resp, err := f.client.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
+			continue
+		}
+		if resp.StatusCode == http.StatusOK {
+			return resp.Body, nil
+		}
+		lastErr = fmt.Errorf("status %d for %s", resp.StatusCode, url)
 		resp.Body.Close()
-		return nil, fmt.Errorf("unexpected status %d for %s", resp.StatusCode, url)
+		time.Sleep(time.Duration(attempt+1) * 500 * time.Millisecond)
 	}
-	return resp.Body, nil
+	return nil, fmt.Errorf("fetch url %s: %w", url, lastErr)
 }
