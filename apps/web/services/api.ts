@@ -9,7 +9,11 @@ const toQueryString = (params: Record<string, string | number | undefined>) =>
     .join('&');
 
 const request = async (path: string, init?: RequestInit) => {
-  const res = await fetch(`${API_BASE}${path}`, init);
+  const res = await fetch(`${API_BASE}${path}`, {
+    cache: 'no-store',
+    headers: { 'Accept': 'application/json', ...(init?.headers || {}) },
+    ...init,
+  });
   if (!res.ok) {
     const text = await res.text();
     throw new Error(text || `Request failed: ${res.status}`);
@@ -74,7 +78,7 @@ export const api = {
   },
 
   getCrawlStatus: async (runId: string): Promise<CrawlRun> => {
-    const res = await request(`/api/crawl/status?runId=${encodeURIComponent(runId)}`);
+    const res = await request(`/api/crawl/status?runId=${encodeURIComponent(runId)}&ts=${Date.now()}`);
     const data = await res.json();
     return {
       id: data.runId,
