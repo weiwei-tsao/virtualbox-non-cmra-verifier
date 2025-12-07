@@ -16,7 +16,7 @@ type HTTPFetcher struct {
 // NewHTTPFetcher creates a fetcher with a sane timeout.
 func NewHTTPFetcher() *HTTPFetcher {
 	return &HTTPFetcher{
-		client: &http.Client{Timeout: 15 * time.Second},
+		client: &http.Client{Timeout: 20 * time.Second},
 	}
 }
 
@@ -27,6 +27,8 @@ func (f *HTTPFetcher) Fetch(ctx context.Context, url string) (io.ReadCloser, err
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Referer", "https://www.anytimemailbox.com/")
 
 	var lastErr error
 	for attempt := 0; attempt < 3; attempt++ {

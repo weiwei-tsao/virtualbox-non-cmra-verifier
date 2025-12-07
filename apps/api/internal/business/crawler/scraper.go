@@ -48,12 +48,18 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 		body, err := fetcher.Fetch(ctx, link)
 		if err != nil {
 			stats.Failed++
+			if onProgress != nil {
+				onProgress(stats)
+			}
 			continue
 		}
 		parsed, err := ParseMailboxHTML(body, link)
 		body.Close()
 		if err != nil {
 			stats.Failed++
+			if onProgress != nil {
+				onProgress(stats)
+			}
 			continue
 		}
 

@@ -86,6 +86,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 	if needsDiscovery {
 		if discovered, err := DiscoverLinks(ctx, s.fetcher, links); err == nil && len(discovered) > 0 {
 			links = discovered
+			log.Printf("run %s: discovered %d detail links", runID, len(links))
 		}
 	}
 
