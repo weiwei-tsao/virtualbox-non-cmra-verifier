@@ -61,7 +61,8 @@ func (r *RunRepository) ListRuns(ctx context.Context, limit int) ([]model.CrawlR
 	if limit <= 0 {
 		limit = 20
 	}
-	iter := r.client.Collection("crawl_runs").OrderBy("startedAt", firestore.Desc).Limit(limit).Documents(ctx)
+	// Order by runId to include documents that might be missing startedAt.
+	iter := r.client.Collection("crawl_runs").OrderBy("runId", firestore.Desc).Limit(limit).Documents(ctx)
 	var runs []model.CrawlRun
 	for {
 		snap, err := iter.Next()
