@@ -79,6 +79,9 @@ func ScrapeAndUpsert(
 		}
 
 		parsed.DataHash = util.HashMailboxKey(parsed.Name, parsed.AddressRaw)
+		if parsed.Link == "" {
+			parsed.Link = link
+		}
 		parsed.CrawlRunID = runID
 		parsed.Active = true
 

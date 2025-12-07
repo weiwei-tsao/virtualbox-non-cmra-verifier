@@ -88,7 +88,8 @@ func parsePrice(raw string) (float64, error) {
 		}
 	}
 	if len(clean) == 0 {
-		return 0, fmt.Errorf("no price found in %q", raw)
+		// Missing price is acceptable; treat as zero.
+		return 0, nil
 	}
 	return strconv.ParseFloat(string(clean), 64)
 }

@@ -9,6 +9,7 @@ import (
 )
 
 const baseURL = "https://www.anytimemailbox.com"
+const detailBaseURL = "https://location.anytimemailbox.com"
 
 // DiscoverLinks parses listing pages to extract ATMB detail links.
 func DiscoverLinks(ctx context.Context, fetcher HTMLFetcher, seeds []string) ([]string, error) {
@@ -85,7 +86,12 @@ func addDetailLinks(doc *goquery.Document, seen map[string]struct{}) {
 			return
 		}
 		if !strings.HasPrefix(href, "http") {
-			href = baseURL + href
+			// Detail pages live under location.anytimemailbox.com
+			if strings.HasPrefix(href, "/s/") {
+				href = detailBaseURL + href
+			} else {
+				href = baseURL + href
+			}
 		}
 		if _, exists := seen[href]; !exists {
 			seen[href] = struct{}{}
