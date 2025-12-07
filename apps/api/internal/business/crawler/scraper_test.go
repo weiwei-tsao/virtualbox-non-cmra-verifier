@@ -79,12 +79,12 @@ func TestScrapeAndUpsert(t *testing.T) {
 		links[1]: bytes.ReplaceAll(sample, []byte(existingMailbox.Link), []byte(links[1])),
 	}
 
-	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, links, "RUN_1")
+	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, nil, links, "RUN_1")
 	if err != nil {
 		t.Fatalf("ScrapeAndUpsert: %v", err)
 	}
 
-	if stats.Found != 2 || stats.Skipped != 1 || stats.Updated != 1 {
+	if stats.Found != 2 || stats.Skipped != 1 || stats.Updated != 1 || stats.Validated != 0 || stats.Failed != 0 {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
 

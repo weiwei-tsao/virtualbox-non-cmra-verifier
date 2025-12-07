@@ -22,13 +22,15 @@ type MailboxStore interface {
 
 // ScrapeStats records counters for a scrape execution.
 type ScrapeStats struct {
-	Found   int
-	Skipped int
-	Updated int
+	Found     int
+	Skipped   int
+	Updated   int
+	Validated int
+	Failed    int
 }
 
 // ScrapeAndUpsert runs the scrape pipeline: fetch pages, parse, hash, compare, and batch upsert.
-func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStore, links []string, runID string) (ScrapeStats, error) {
+func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStore, validator ValidationClient, links []string, runID string) (ScrapeStats, error) {
 	stats := ScrapeStats{Found: len(links)}
 
 	existing, err := store.FetchAllMap(ctx)
@@ -60,6 +62,22 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 			// Preserve IDs so updates target existing docs.
 			parsed.ID = prev.ID
 		}
+
+		needsValidation := true
+		if parsed.CMRA != "" && parsed.RDI != "" {
+			needsValidation = false
+		}
+
+		if needsValidation && validator != nil {
+			validated, err := validator.ValidateMailbox(ctx, parsed)
+			if err != nil {
+				stats.Failed++
+			} else {
+				parsed = validated
+				stats.Validated++
+			}
+		}
+
 		toSave = append(toSave, parsed)
 		stats.Updated++
 	}
