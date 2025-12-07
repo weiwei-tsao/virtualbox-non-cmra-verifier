@@ -109,7 +109,9 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 		}
 	}
 
-	scrapeStats, err := ScrapeAndUpsert(ctx, s.fetcher, s.mailboxes, s.validator, links, runID, progress)
+	scrapeStats, err := ScrapeAndUpsert(ctx, s.fetcher, s.mailboxes, s.validator, links, runID, progress, func(msg string) {
+		log.Printf("run %s: %s", runID, msg)
+	})
 	if err != nil {
 		status = "failed"
 		log.Printf("scrape error run %s: %v", runID, err)

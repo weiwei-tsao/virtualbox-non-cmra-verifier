@@ -30,7 +30,16 @@ type ScrapeStats struct {
 }
 
 // ScrapeAndUpsert runs the scrape pipeline: fetch pages, parse, hash, compare, and batch upsert.
-func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStore, validator ValidationClient, links []string, runID string, onProgress func(ScrapeStats)) (ScrapeStats, error) {
+func ScrapeAndUpsert(
+	ctx context.Context,
+	fetcher HTMLFetcher,
+	store MailboxStore,
+	validator ValidationClient,
+	links []string,
+	runID string,
+	onProgress func(ScrapeStats),
+	logFn func(string),
+) (ScrapeStats, error) {
 	stats := ScrapeStats{Found: len(links)}
 
 	existing, err := store.FetchAllMap(ctx)
@@ -48,6 +57,9 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 		body, err := fetcher.Fetch(ctx, link)
 		if err != nil {
 			stats.Failed++
+			if logFn != nil {
+				logFn(fmt.Sprintf("fetch %s error: %v", link, err))
+			}
 			if onProgress != nil {
 				onProgress(stats)
 			}
@@ -57,6 +69,9 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 		body.Close()
 		if err != nil {
 			stats.Failed++
+			if logFn != nil {
+				logFn(fmt.Sprintf("parse %s error: %v", link, err))
+			}
 			if onProgress != nil {
 				onProgress(stats)
 			}
@@ -85,6 +100,9 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 			validated, err := validator.ValidateMailbox(ctx, parsed)
 			if err != nil {
 				stats.Failed++
+				if logFn != nil {
+					logFn(fmt.Sprintf("validate %s error: %v", link, err))
+				}
 			} else {
 				parsed = validated
 				stats.Validated++
@@ -100,6 +118,9 @@ func ScrapeAndUpsert(ctx context.Context, fetcher HTMLFetcher, store MailboxStor
 	}
 
 	if err := store.BatchUpsert(ctx, toSave); err != nil {
+		if logFn != nil {
+			logFn(fmt.Sprintf("batch upsert error: %v", err))
+		}
 		return stats, fmt.Errorf("batch upsert: %w", err)
 	}
 	return stats, nil

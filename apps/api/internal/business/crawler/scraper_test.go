@@ -79,7 +79,7 @@ func TestScrapeAndUpsert(t *testing.T) {
 		links[1]: bytes.ReplaceAll(sample, []byte(existingMailbox.Link), []byte(links[1])),
 	}
 
-	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, nil, links, "RUN_1", nil)
+	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, nil, links, "RUN_1", nil, nil)
 	if err != nil {
 		t.Fatalf("ScrapeAndUpsert: %v", err)
 	}
