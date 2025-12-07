@@ -61,7 +61,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 		}
 	}
 
-	stats := model.CrawlRunStats{}
+	stats := model.CrawlRunStats{Found: len(links)}
 	status := "success"
 
 	progress := func(curr ScrapeStats) {
