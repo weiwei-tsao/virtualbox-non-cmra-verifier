@@ -17,43 +17,49 @@ func ParseMailboxHTML(r io.Reader, sourceLink string) (model.Mailbox, error) {
 		return model.Mailbox{}, fmt.Errorf("parse html: %w", err)
 	}
 
-	name := strings.TrimSpace(doc.Find(".mailbox-name").First().Text())
+	// Extract name from h1 tag (e.g., "Chicago - Monroe St")
+	name := strings.TrimSpace(doc.Find("h1").First().Text())
 	if name == "" {
-		name = strings.TrimSpace(doc.Find("h1.t-title").First().Text())
+		name = "YOUR NAME" // Default fallback
 	}
 
-	street := strings.TrimSpace(doc.Find(".address .street").First().Text())
-	city := strings.TrimSpace(doc.Find(".address .city").First().Text())
-	state := strings.TrimSpace(doc.Find(".address .state").First().Text())
-	zip := strings.TrimSpace(doc.Find(".address .zip").First().Text())
+	// Extract address lines from .t-text > div structure
+	// Expected structure:
+	//   Line 0: "73 W Monroe St" (street)
+	//   Line 1: "5th Floor #MAILBOX" (suite/unit - optional)
+	//   Line 2: "Chicago, IL 60603" (city, state, zip)
+	//   Line 3: "United States" (country)
+	var street, city, state, zip string
+	var addressLines []string
+	doc.Find(".t-text > div").Each(func(_ int, s *goquery.Selection) {
+		txt := strings.TrimSpace(s.Text())
+		if txt != "" && txt != "United States" {
+			addressLines = append(addressLines, txt)
+		}
+	})
 
-	// Fallback for ATMB detail page structure (t-sec1 > t-text > div)
-	if street == "" || city == "" || state == "" || zip == "" {
-		var lines []string
-		doc.Find("div.t-sec1 div.t-text div").Each(func(_ int, s *goquery.Selection) {
-			txt := strings.TrimSpace(s.Text())
-			if txt != "" {
-				lines = append(lines, txt)
+	// Parse address lines
+	if len(addressLines) >= 2 {
+		// First line is street (possibly with suite/unit on second line)
+		street = addressLines[0]
+
+		// Last line should be "City, State Zip" format
+		cityStateZip := addressLines[len(addressLines)-1]
+		parts := strings.Split(cityStateZip, ",")
+		if len(parts) >= 2 {
+			city = strings.TrimSpace(parts[0])
+			stateZip := strings.Fields(strings.TrimSpace(parts[1]))
+			if len(stateZip) >= 1 {
+				state = stateZip[0]
 			}
-		})
-		if len(lines) >= 3 {
-			street = lines[0]
-			line2 := lines[1]
-			parts := strings.Split(line2, ",")
-			if len(parts) >= 2 {
-				city = strings.TrimSpace(parts[0])
-				stateZip := strings.Fields(strings.TrimSpace(parts[1]))
-				if len(stateZip) >= 1 {
-					state = stateZip[0]
-				}
-				if len(stateZip) >= 2 {
-					zip = stateZip[1]
-				}
+			if len(stateZip) >= 2 {
+				zip = stateZip[1]
 			}
 		}
 	}
 
-	priceRaw := strings.TrimSpace(doc.Find(".price, .t-price, .t-plan-price").First().Text())
+	// Extract price from first plan (e.g., "US$ 19.99 / month")
+	priceRaw := strings.TrimSpace(doc.Find(".t-plan .t-price").First().Text())
 
 	price, err := parsePrice(priceRaw)
 	if err != nil {

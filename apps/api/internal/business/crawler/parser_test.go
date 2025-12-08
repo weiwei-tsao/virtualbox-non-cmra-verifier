@@ -17,19 +17,25 @@ func TestParseMailboxHTML(t *testing.T) {
 		t.Fatalf("ParseMailboxHTML: %v", err)
 	}
 
-	if mailbox.Name != "ABC Mailbox Store" {
-		t.Errorf("name = %q, want %q", mailbox.Name, "ABC Mailbox Store")
+	if mailbox.Name != "Chicago - Monroe St" {
+		t.Errorf("name = %q, want %q", mailbox.Name, "Chicago - Monroe St")
 	}
-	if mailbox.AddressRaw.Street != "123 Main St Suite 100" {
-		t.Errorf("street = %q", mailbox.AddressRaw.Street)
+	if mailbox.AddressRaw.Street != "73 W Monroe St" {
+		t.Errorf("street = %q, want %q", mailbox.AddressRaw.Street, "73 W Monroe St")
 	}
-	if mailbox.AddressRaw.City != "Dover" || mailbox.AddressRaw.State != "DE" || mailbox.AddressRaw.Zip != "19901" {
-		t.Errorf("address = %+v", mailbox.AddressRaw)
+	if mailbox.AddressRaw.City != "Chicago" {
+		t.Errorf("city = %q, want %q", mailbox.AddressRaw.City, "Chicago")
 	}
-	if mailbox.Price != 12.99 {
-		t.Errorf("price = %v, want 12.99", mailbox.Price)
+	if mailbox.AddressRaw.State != "IL" {
+		t.Errorf("state = %q, want %q", mailbox.AddressRaw.State, "IL")
 	}
-	if mailbox.Link != "https://anytimemailbox.com/locations/abc-mailbox-store" {
+	if mailbox.AddressRaw.Zip != "60603" {
+		t.Errorf("zip = %q, want %q", mailbox.AddressRaw.Zip, "60603")
+	}
+	if mailbox.Price != 19.99 {
+		t.Errorf("price = %v, want 19.99", mailbox.Price)
+	}
+	if mailbox.Link != "https://anytimemailbox.com/locations/default" {
 		t.Errorf("link = %q", mailbox.Link)
 	}
 }
