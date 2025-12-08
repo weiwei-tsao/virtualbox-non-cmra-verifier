@@ -53,7 +53,7 @@ func ScrapeAndUpsert(
 	}
 
 	var toSave []model.Mailbox
-	const incrementalWriteThreshold = 100 // Write to DB every 100 items
+	const incrementalWriteThreshold = 20 // Write to DB every 20 items (reduced due to RawHTML size)
 
 	for _, link := range links {
 		select {

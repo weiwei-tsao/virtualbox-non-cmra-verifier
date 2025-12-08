@@ -60,7 +60,7 @@ func ReprocessFromDB(
 	}
 
 	var toUpdate []model.Mailbox
-	const incrementalWriteThreshold = 100
+	const incrementalWriteThreshold = 20 // Write to DB every 20 items (reduced due to RawHTML size)
 
 	for link, mb := range existing {
 		select {
