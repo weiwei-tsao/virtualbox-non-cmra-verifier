@@ -44,6 +44,7 @@ func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepo
 		api.GET("/mailboxes/export", r.exportMailboxes)
 		api.GET("/stats", r.getStats)
 		api.POST("/crawl/run", r.startCrawl)
+		api.POST("/crawl/reprocess", r.reprocessMailboxes)
 		api.GET("/crawl/status", r.getCrawlStatus)
 		api.GET("/crawl/runs", r.listCrawlRuns)
 	}
@@ -189,4 +190,33 @@ func (r *Router) listCrawlRuns(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": runs})
+}
+
+type reprocessReq struct {
+	TargetVersion string `json:"targetVersion"` // Optional: parser version to update to (defaults to current)
+	OnlyOutdated  bool   `json:"onlyOutdated"`  // Optional: only reprocess records with different parser version
+}
+
+func (r *Router) reprocessMailboxes(c *gin.Context) {
+	var req reprocessReq
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid body"})
+		return
+	}
+
+	opts := crawler.ReprocessOptions{
+		TargetVersion: req.TargetVersion,
+		OnlyOutdated:  req.OnlyOutdated,
+	}
+
+	runID, err := r.crawler.Reprocess(c.Request.Context(), opts)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"runId":   runID,
+		"message": "Reprocessing started. Check status with GET /api/crawl/status?runId=" + runID,
+	})
 }

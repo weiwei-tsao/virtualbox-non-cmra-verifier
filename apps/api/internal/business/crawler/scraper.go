@@ -1,13 +1,18 @@
 package crawler
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/util"
 )
+
+// CurrentParserVersion tracks the parser logic version for reprocessing support.
+const CurrentParserVersion = "v1.0"
 
 // HTMLFetcher abstracts how pages are fetched so we can test the scraper without network calls.
 type HTMLFetcher interface {
@@ -67,8 +72,23 @@ func ScrapeAndUpsert(
 			}
 			continue
 		}
-		parsed, err := ParseMailboxHTML(body, link)
+
+		// Read HTML into memory for both parsing and storage
+		htmlBytes, err := io.ReadAll(body)
 		body.Close()
+		if err != nil {
+			stats.Failed++
+			if logFn != nil {
+				logFn(fmt.Sprintf("read %s error: %v", link, err))
+			}
+			if onProgress != nil {
+				onProgress(stats)
+			}
+			continue
+		}
+
+		// Parse HTML from bytes
+		parsed, err := ParseMailboxHTML(bytes.NewReader(htmlBytes), link)
 		if err != nil {
 			stats.Failed++
 			if logFn != nil {
@@ -80,12 +100,18 @@ func ScrapeAndUpsert(
 			continue
 		}
 
+		// Set metadata fields
 		parsed.DataHash = util.HashMailboxKey(parsed.Name, parsed.AddressRaw)
 		if parsed.Link == "" {
 			parsed.Link = link
 		}
 		parsed.CrawlRunID = runID
 		parsed.Active = true
+
+		// Save raw HTML for reprocessing support
+		parsed.RawHTML = string(htmlBytes)
+		parsed.ParserVersion = CurrentParserVersion
+		parsed.LastParsedAt = time.Now()
 
 		if prev, ok := existing[parsed.Link]; ok {
 			if prev.DataHash == parsed.DataHash && prev.CMRA != "" {

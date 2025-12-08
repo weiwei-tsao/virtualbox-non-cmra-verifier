@@ -150,3 +150,85 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 func generateRunID() string {
 	return fmt.Sprintf("RUN_%d", time.Now().Unix())
 }
+
+// Reprocess re-parses mailboxes from stored RawHTML without re-fetching.
+// Returns immediately with a runID; actual reprocessing happens asynchronously.
+func (s *Service) Reprocess(ctx context.Context, opts ReprocessOptions) (string, error) {
+	runID := generateRunID()
+	startTime := time.Now().UTC()
+
+	if err := StartRun(ctx, s.runs, runID, startTime); err != nil {
+		return "", err
+	}
+
+	// Run reprocessing asynchronously
+	runCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	go func() {
+		defer cancel()
+		s.executeReprocess(runCtx, runID, opts, startTime)
+	}()
+
+	return runID, nil
+}
+
+func (s *Service) executeReprocess(ctx context.Context, runID string, opts ReprocessOptions, startedAt time.Time) {
+	status := "running"
+	stats := model.CrawlRunStats{}
+
+	// Always finalize the run document
+	defer func() {
+		if rec := recover(); rec != nil {
+			status = "failed"
+			log.Printf("reprocess panic run %s: %v", runID, rec)
+		}
+		if err := FinishRun(ctx, s.runs, runID, stats, status, startedAt); err != nil {
+			log.Printf("finish run %s: %v", runID, err)
+		}
+	}()
+
+	progress := func(curr ReprocessStats) {
+		// Update run status periodically
+		if curr.Processed%25 == 0 || curr.Processed+curr.Skipped >= curr.Total {
+			_ = s.runs.UpdateRun(ctx, model.CrawlRun{
+				RunID:  runID,
+				Status: "running",
+				Stats: model.CrawlRunStats{
+					Found:     curr.Total,
+					Validated: curr.Processed,
+					Skipped:   curr.Skipped,
+					Failed:    curr.Failed,
+				},
+			})
+		}
+	}
+
+	reprocessStats, err := ReprocessFromDB(ctx, s.mailboxes, s.validator, opts, func(msg string) {
+		log.Printf("run %s: %s", runID, msg)
+	}, progress)
+
+	if err != nil {
+		status = "failed"
+		log.Printf("reprocess error run %s: %v", runID, err)
+	} else {
+		status = "success"
+	}
+
+	stats.Found = reprocessStats.Total
+	stats.Validated = reprocessStats.Processed
+	stats.Skipped = reprocessStats.Skipped
+	stats.Failed = reprocessStats.Failed
+
+	// Update system stats after reprocessing
+	all, err := s.mailboxes.FetchAllMap(ctx)
+	if err == nil {
+		var list []model.Mailbox
+		for _, m := range all {
+			list = append(list, m)
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i].Link < list[j].Link })
+		sysStats := AggregateSystemStats(list)
+		if err := s.statsRepo.SaveSystemStats(ctx, sysStats); err != nil {
+			log.Printf("save system stats error run %s: %v", runID, err)
+		}
+	}
+}
