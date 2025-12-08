@@ -24,23 +24,29 @@ func ParseMailboxHTML(r io.Reader, sourceLink string) (model.Mailbox, error) {
 	}
 
 	// Extract address lines from .t-text > div structure
-	// Expected structure:
-	//   Line 0: "73 W Monroe St" (street)
-	//   Line 1: "5th Floor #MAILBOX" (suite/unit - optional)
-	//   Line 2: "Chicago, IL 60603" (city, state, zip)
-	//   Line 3: "United States" (country)
+	// Actual HTML structure includes labels and placeholders:
+	//   Line 0: "Your Real Street Address" (label - skip)
+	//   Line 1: "YOUR NAME" (placeholder - skip)
+	//   Line 2: "73 W Monroe St" (street - TAKE THIS!)
+	//   Line 3: "5th Floor #MAILBOX" (suite/unit - optional)
+	//   Line 4: "Chicago, IL 60603" (city, state, zip)
+	//   Line 5: "United States" (country - skip)
 	var street, city, state, zip string
 	var addressLines []string
 	doc.Find(".t-text > div").Each(func(_ int, s *goquery.Selection) {
 		txt := strings.TrimSpace(s.Text())
-		if txt != "" && txt != "United States" {
+		// Skip labels, placeholders, and country
+		if txt != "" && txt != "United States" &&
+		   txt != "Your Real Street Address" &&
+		   txt != "YOUR NAME" &&
+		   txt != "Vanity Address" {
 			addressLines = append(addressLines, txt)
 		}
 	})
 
 	// Parse address lines
 	if len(addressLines) >= 2 {
-		// First line is street (possibly with suite/unit on second line)
+		// First real line is street address
 		street = addressLines[0]
 
 		// Last line should be "City, State Zip" format

@@ -12,7 +12,7 @@ import (
 )
 
 // CurrentParserVersion tracks the parser logic version for reprocessing support.
-const CurrentParserVersion = "v1.0"
+const CurrentParserVersion = "v1.1"
 
 // HTMLFetcher abstracts how pages are fetched so we can test the scraper without network calls.
 type HTMLFetcher interface {
