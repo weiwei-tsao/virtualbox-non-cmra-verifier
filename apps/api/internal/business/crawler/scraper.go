@@ -48,6 +48,8 @@ func ScrapeAndUpsert(
 	}
 
 	var toSave []model.Mailbox
+	const incrementalWriteThreshold = 100 // Write to DB every 100 items
+
 	for _, link := range links {
 		select {
 		case <-ctx.Done():
@@ -115,16 +117,36 @@ func ScrapeAndUpsert(
 		toSave = append(toSave, parsed)
 		stats.Updated++
 
+		// Incremental write: flush to DB every N items to prevent data loss
+		if len(toSave) >= incrementalWriteThreshold {
+			if err := store.BatchUpsert(ctx, toSave); err != nil {
+				if logFn != nil {
+					logFn(fmt.Sprintf("incremental batch upsert error: %v", err))
+				}
+				return stats, fmt.Errorf("batch upsert: %w", err)
+			}
+			if logFn != nil {
+				logFn(fmt.Sprintf("wrote %d items to DB (incremental)", len(toSave)))
+			}
+			toSave = toSave[:0] // Clear slice but keep capacity
+		}
+
 		if onProgress != nil {
 			onProgress(stats)
 		}
 	}
 
-	if err := store.BatchUpsert(ctx, toSave); err != nil {
-		if logFn != nil {
-			logFn(fmt.Sprintf("batch upsert error: %v", err))
+	// Final write: flush any remaining items
+	if len(toSave) > 0 {
+		if err := store.BatchUpsert(ctx, toSave); err != nil {
+			if logFn != nil {
+				logFn(fmt.Sprintf("final batch upsert error: %v", err))
+			}
+			return stats, fmt.Errorf("batch upsert: %w", err)
 		}
-		return stats, fmt.Errorf("batch upsert: %w", err)
+		if logFn != nil {
+			logFn(fmt.Sprintf("wrote final %d items to DB", len(toSave)))
+		}
 	}
 	return stats, nil
 }
