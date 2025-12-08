@@ -36,6 +36,11 @@ func (m *mockStore) FetchAllMap(ctx context.Context) (map[string]model.Mailbox, 
 	return m.existing, nil
 }
 
+func (m *mockStore) FetchAllMetadata(ctx context.Context) (map[string]model.Mailbox, error) {
+	// Mock returns full data for simplicity in tests
+	return m.existing, nil
+}
+
 func (m *mockStore) BatchUpsert(ctx context.Context, mailboxes []model.Mailbox) error {
 	m.saved = append(m.saved, mailboxes...)
 	return nil
