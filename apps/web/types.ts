@@ -6,28 +6,31 @@ export interface StandardizedAddress {
 export interface Mailbox {
   id: string;
   name: string;
-  street: string;
-  city: string;
-  state: string;
-  zip: string;
+  street?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
   price: number;
   link: string;
-  cmra: 'Y' | 'N' | 'Unknown';
-  rdi: 'Residential' | 'Commercial' | 'Unknown';
+  cmra?: 'Y' | 'N' | 'Unknown' | string;
+  rdi?: 'Residential' | 'Commercial' | 'Unknown' | string;
   standardizedAddress?: StandardizedAddress;
-  lastValidatedAt: string;
-  crawlRunId: string;
+  lastValidatedAt?: string;
+  crawlRunId?: string;
 }
 
 export interface CrawlRun {
   id: string;
   startedAt: string;
   finishedAt?: string;
-  status: 'running' | 'success' | 'failed';
-  totalFound: number;
-  totalValidated: number;
-  totalFailed: number;
-  errorsSample: Array<{ link: string; reason: string }>;
+  status: 'running' | 'success' | 'failed' | 'partial_halt';
+  stats: {
+    found: number;
+    validated: number;
+    skipped: number;
+    failed: number;
+  };
+  errorsSample?: Array<{ link: string; reason: string }>;
 }
 
 export interface MailboxFilter {

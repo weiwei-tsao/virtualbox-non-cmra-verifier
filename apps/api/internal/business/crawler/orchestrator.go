@@ -107,20 +107,21 @@ type RunLifecycleRepo interface {
 }
 
 // StartRun initializes a CrawlRun record.
-func StartRun(ctx context.Context, repo RunLifecycleRepo, runID string) error {
+func StartRun(ctx context.Context, repo RunLifecycleRepo, runID string, startedAt time.Time) error {
 	return repo.CreateRun(ctx, model.CrawlRun{
 		RunID:     runID,
 		Status:    "running",
-		StartedAt: time.Now().UTC(),
+		StartedAt: startedAt,
 	})
 }
 
 // FinishRun finalizes a CrawlRun record with stats and status.
-func FinishRun(ctx context.Context, repo RunLifecycleRepo, runID string, stats model.CrawlRunStats, status string) error {
+func FinishRun(ctx context.Context, repo RunLifecycleRepo, runID string, stats model.CrawlRunStats, status string, startedAt time.Time) error {
 	return repo.UpdateRun(ctx, model.CrawlRun{
 		RunID:      runID,
 		Status:     status,
 		Stats:      stats,
+		StartedAt:  startedAt,
 		FinishedAt: time.Now().UTC(),
 	})
 }

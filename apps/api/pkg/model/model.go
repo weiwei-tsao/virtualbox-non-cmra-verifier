@@ -30,6 +30,10 @@ type Mailbox struct {
 	LastValidatedAt     time.Time           `json:"lastValidatedAt,omitempty" firestore:"lastValidatedAt,omitempty"`
 	CrawlRunID          string              `json:"crawlRunId,omitempty" firestore:"crawlRunId,omitempty"`
 	Active              bool                `json:"active,omitempty" firestore:"active,omitempty"`
+	// Fields for reprocessing support
+	RawHTML       string    `json:"-" firestore:"rawHTML,omitempty"`             // Original HTML (not exposed to API)
+	ParserVersion string    `json:"parserVersion,omitempty" firestore:"parserVersion,omitempty"` // Parser version (e.g., "v1.0")
+	LastParsedAt  time.Time `json:"lastParsedAt,omitempty" firestore:"lastParsedAt,omitempty"`   // Last parsing timestamp
 }
 
 // CrawlRunStats stores aggregated counters for a crawl job.

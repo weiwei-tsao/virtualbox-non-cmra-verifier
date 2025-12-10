@@ -7,6 +7,7 @@ export const Mailboxes: React.FC = () => {
   const [data, setData] = useState<Mailbox[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [stateOptions, setStateOptions] = useState<string[]>([]);
   const [filter, setFilter] = useState<MailboxFilter>({
     page: 1,
     pageSize: 10,
@@ -26,6 +27,16 @@ export const Mailboxes: React.FC = () => {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    api.getStats()
+      .then((stats) => {
+        const states = stats.byState.map((s) => s.name).filter(Boolean);
+        const unique = Array.from(new Set(states)).sort();
+        setStateOptions(unique);
+      })
+      .catch((err) => console.error(err));
+  }, []);
 
   useEffect(() => {
     fetchData();
@@ -89,10 +100,9 @@ export const Mailboxes: React.FC = () => {
             onChange={(e) => setFilter({ ...filter, state: e.target.value, page: 1 })}
           >
             <option value="">All States</option>
-            <option value="CA">California</option>
-            <option value="NY">New York</option>
-            <option value="TX">Texas</option>
-            <option value="FL">Florida</option>
+            {stateOptions.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
           </select>
 
           <select
@@ -162,24 +172,24 @@ export const Mailboxes: React.FC = () => {
                       </a>
                     </td>
                     <td className="px-6 py-4">
-                      <div className="text-sm text-gray-900">{item.street}</div>
-                      <div className="text-sm text-gray-500">{item.city}, {item.state} {item.zip}</div>
+                      <div className="text-sm text-gray-900">{item.street || 'N/A'}</div>
+                      <div className="text-sm text-gray-500">{item.city || 'Unknown'}, {item.state || '--'} {item.zip || ''}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {getRDIBadge(item.rdi)}
+                      {getRDIBadge(item.rdi || 'Unknown')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {getCMRABadge(item.cmra)}
+                      {getCMRABadge(item.cmra || 'N')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      ${item.price.toFixed(2)}/mo
+                      ${Number(item.price || 0).toFixed(2)}/mo
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">
                       <div className="flex items-center justify-end text-green-600 text-xs">
                          <CheckCircle2 size={14} className="mr-1"/> Valid
                       </div>
                       <div className="text-[10px] text-gray-400 mt-1">
-                        {new Date(item.lastValidatedAt).toLocaleDateString()}
+                        {item.lastValidatedAt ? new Date(item.lastValidatedAt).toLocaleDateString() : '—'}
                       </div>
                     </td>
                   </tr>

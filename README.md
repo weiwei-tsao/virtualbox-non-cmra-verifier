@@ -100,6 +100,8 @@ SMARTY_MOCK=true
 CRAWLER_CONCURRENCY=5
 # Smarty 调用重试次数
 SMARTY_MAX_RETRIES=3
+# 可选：默认的详情页链接列表（逗号分隔），若启动任务未传 links 时使用
+CRAWL_LINK_SEEDS=https://anytimemailbox.com/locations/abc-store
 EOF
 
 env $(cat .env.local | xargs) go run ./cmd/server
@@ -110,3 +112,19 @@ Notes:
 - The backend expects either `FIREBASE_CREDS_BASE64` or `FIREBASE_CREDS_FILE` to be set (one is required).
 - Keep `SMARTY_MOCK=true` if you do not want live Smarty calls during local development.
 - Health check is available at `http://localhost:8080/healthz`.
+
+## 5. Backend API (current)
+
+- `GET /api/mailboxes` — list with pagination/filter (`state`, `cmra`, `rdi`, `active`, `page`, `pageSize`).
+- `GET /api/mailboxes/export` — CSV streaming (active only).
+- `GET /api/stats` — returns precomputed `system/stats`.
+- `POST /api/crawl/run` — start crawl; body `{ "links": ["https://anytimemailbox.com/locations/..."] }`.
+- `GET /api/crawl/status?runId=...` — fetch crawl run status.
+- `GET /healthz` — liveness probe.
+
+## 6. Deployment notes (Render/Firebase/Vercel)
+
+- Render build/start: `go build -o server cmd/server/main.go` then `./server`.
+- Ensure env vars on Render: `PORT`, `FIREBASE_PROJECT_ID`, `FIREBASE_CREDS_BASE64`, `SMARTY_AUTH_ID`, `SMARTY_AUTH_TOKEN`, `SMARTY_MOCK`, `ALLOWED_ORIGINS`.
+- Firestore indexes: see `apps/api/firestore.indexes.json` (active+state, active+rdi, crawlRunId).
+- Keep frontend dev origin in `ALLOWED_ORIGINS` to avoid CORS issues (e.g., `http://localhost:5173`).***

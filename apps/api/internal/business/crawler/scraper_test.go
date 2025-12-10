@@ -36,6 +36,11 @@ func (m *mockStore) FetchAllMap(ctx context.Context) (map[string]model.Mailbox, 
 	return m.existing, nil
 }
 
+func (m *mockStore) FetchAllMetadata(ctx context.Context) (map[string]model.Mailbox, error) {
+	// Mock returns full data for simplicity in tests
+	return m.existing, nil
+}
+
 func (m *mockStore) BatchUpsert(ctx context.Context, mailboxes []model.Mailbox) error {
 	m.saved = append(m.saved, mailboxes...)
 	return nil
@@ -50,16 +55,16 @@ func TestScrapeAndUpsert(t *testing.T) {
 	// Existing mailbox with matching hash and CMRA should be skipped.
 	existingMailbox := model.Mailbox{
 		ID:   "existing-id",
-		Link: "https://anytimemailbox.com/locations/abc-mailbox-store",
-		Name: "ABC Mailbox Store",
+		Link: "https://anytimemailbox.com/locations/chicago-monroe-st",
+		Name: "Chicago - Monroe St",
 		AddressRaw: model.AddressRaw{
-			Street: "123 Main St Suite 100",
-			City:   "Dover",
-			State:  "DE",
-			Zip:    "19901",
+			Street: "73 W Monroe St",
+			City:   "Chicago",
+			State:  "IL",
+			Zip:    "60603",
 		},
 		CMRA:     "Y",
-		DataHash: util.HashMailboxKey("ABC Mailbox Store", model.AddressRaw{Street: "123 Main St Suite 100", City: "Dover", State: "DE", Zip: "19901"}),
+		DataHash: util.HashMailboxKey("Chicago - Monroe St", model.AddressRaw{Street: "73 W Monroe St", City: "Chicago", State: "IL", Zip: "60603"}),
 	}
 
 	store := &mockStore{
@@ -74,17 +79,19 @@ func TestScrapeAndUpsert(t *testing.T) {
 		"https://anytimemailbox.com/locations/new-mailbox-store",
 	}
 
-	// Make the second link return HTML whose store-link matches the new URL.
+	// The first link returns sample HTML as-is (matching existing mailbox).
+	// The second link returns the same HTML (parser uses sourceLink as the link field).
 	fetcher.perURL = map[string][]byte{
-		links[1]: bytes.ReplaceAll(sample, []byte(existingMailbox.Link), []byte(links[1])),
+		links[0]: sample,
+		links[1]: sample,
 	}
 
-	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, links, "RUN_1")
+	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, nil, links, "RUN_1", nil, nil)
 	if err != nil {
 		t.Fatalf("ScrapeAndUpsert: %v", err)
 	}
 
-	if stats.Found != 2 || stats.Skipped != 1 || stats.Updated != 1 {
+	if stats.Found != 2 || stats.Skipped != 1 || stats.Updated != 1 || stats.Validated != 0 || stats.Failed != 0 {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
 

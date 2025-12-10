@@ -1,0 +1,36 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "mailboxes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "addressRaw.state", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mailboxes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "rdi", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mailboxes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "crawlRunId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mailboxes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "parserVersion", "order": "ASCENDING" },
+        { "fieldPath": "lastParsedAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

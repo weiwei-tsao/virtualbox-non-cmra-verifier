@@ -16,10 +16,11 @@ type Config struct {
 	FirebaseProjectID   string
 	FirebaseCredsBase64 string
 	FirebaseCredsFile   string
-	SmartyAuthID        string
-	SmartyAuthToken     string
+	SmartyAuthIDs       []string // Multiple auth IDs for load balancing
+	SmartyAuthTokens    []string // Multiple auth tokens (must match IDs length)
 	SmartyMock          bool
 	AllowedOrigins      string
+	CrawlLinkSeeds      []string
 }
 
 // Load reads environment variables into a Config with sensible defaults.
@@ -30,9 +31,10 @@ func Load() (Config, error) {
 		FirebaseProjectID:   strings.TrimSpace(os.Getenv("FIREBASE_PROJECT_ID")),
 		FirebaseCredsBase64: strings.TrimSpace(os.Getenv("FIREBASE_CREDS_BASE64")),
 		FirebaseCredsFile:   strings.TrimSpace(os.Getenv("FIREBASE_CREDS_FILE")),
-		SmartyAuthID:        strings.TrimSpace(os.Getenv("SMARTY_AUTH_ID")),
-		SmartyAuthToken:     strings.TrimSpace(os.Getenv("SMARTY_AUTH_TOKEN")),
+		SmartyAuthIDs:       splitCSV(os.Getenv("SMARTY_AUTH_ID")),      // Parse comma-separated IDs
+		SmartyAuthTokens:    splitCSV(os.Getenv("SMARTY_AUTH_TOKEN")),   // Parse comma-separated tokens
 		AllowedOrigins:      strings.TrimSpace(os.Getenv("ALLOWED_ORIGINS")),
+		CrawlLinkSeeds:      splitCSV(os.Getenv("CRAWL_LINK_SEEDS")),
 	}
 
 	mock, err := parseBoolEnv("SMARTY_MOCK", false)
@@ -57,6 +59,14 @@ func (c Config) Validate() error {
 	}
 	if c.FirebaseCredsBase64 == "" && c.FirebaseCredsFile == "" {
 		return errors.New("provide FIREBASE_CREDS_BASE64 or FIREBASE_CREDS_FILE for Firestore auth")
+	}
+	// Validate Smarty credentials count matches (when not in mock mode)
+	if !c.SmartyMock && len(c.SmartyAuthIDs) != len(c.SmartyAuthTokens) {
+		return fmt.Errorf("SMARTY_AUTH_ID count (%d) must match SMARTY_AUTH_TOKEN count (%d)",
+			len(c.SmartyAuthIDs), len(c.SmartyAuthTokens))
+	}
+	if !c.SmartyMock && len(c.SmartyAuthIDs) == 0 {
+		return errors.New("SMARTY_AUTH_ID and SMARTY_AUTH_TOKEN are required when SMARTY_MOCK=false")
 	}
 	return nil
 }
@@ -97,4 +107,15 @@ func parseBoolEnv(key string, defaultVal bool) (bool, error) {
 		return false, err
 	}
 	return parsed, nil
+}
+
+func splitCSV(val string) []string {
+	parts := strings.Split(val, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if s := strings.TrimSpace(p); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
 }
