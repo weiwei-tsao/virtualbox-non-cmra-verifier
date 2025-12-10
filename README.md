@@ -122,7 +122,44 @@ Notes:
 - `GET /api/crawl/status?runId=...` — fetch crawl run status.
 - `GET /healthz` — liveness probe.
 
-## 6. Deployment notes (Render/Firebase/Vercel)
+## 6. iPost1 Integration (NEW)
+
+**文档**: [快速开始](docs/ipost1_README.md) | [完整实现方案](docs/ipost1_final_implementation_plan.md)
+
+iPost1 虚拟邮箱服务商，提供 ~4000 个美国地点。API 结构已验证，实现方案已完成。
+
+### 状态
+
+- ✅ API 结构已验证（JSON + HTML 混合）
+- ✅ 完整实现方案已就绪
+- ⏳ 待实现：Go 代码（预计 10-14 小时）
+
+### 技术方案
+
+- **数据源**: `locations_ajax.php` API（返回 JSON 包裹 HTML）
+- **反爬虫**: chromedp 浏览器自动化
+- **解析**: goquery 提取 HTML 中的地址字段
+- **复用**: 完全使用现有 `Mailbox` 模型
+
+### 快速开始
+
+```bash
+# 查看实现方案
+cat docs/ipost1_final_implementation_plan.md
+
+# 安装依赖
+go get github.com/chromedp/chromedp github.com/PuerkitoBio/goquery
+
+# 创建文件
+mkdir -p apps/api/internal/business/crawler/ipost1
+
+# 实现代码（参考文档中的完整示例）
+# - client.go
+# - parser.go
+# - discovery.go
+```
+
+## 7. Deployment notes (Render/Firebase/Vercel)
 
 - Render build/start: `go build -o server cmd/server/main.go` then `./server`.
 - Ensure env vars on Render: `PORT`, `FIREBASE_PROJECT_ID`, `FIREBASE_CREDS_BASE64`, `SMARTY_AUTH_ID`, `SMARTY_AUTH_TOKEN`, `SMARTY_MOCK`, `ALLOWED_ORIGINS`.
