@@ -12,10 +12,11 @@ import (
 
 // ReprocessOptions configures how reprocessing is performed.
 type ReprocessOptions struct {
-	TargetVersion string    // Target parser version (defaults to CurrentParserVersion)
-	OnlyOutdated  bool      // Only reprocess records with different parser version
-	SinceTime     time.Time // Only reprocess records updated after this time
-	BatchSize     int       // Number of records to process per batch (defaults to 100)
+	TargetVersion   string    // Target parser version (defaults to CurrentParserVersion)
+	OnlyOutdated    bool      // Only reprocess records with different parser version
+	ForceRevalidate bool      // Force Smarty re-validation even if DataHash unchanged (useful when switching from mock to real API)
+	SinceTime       time.Time // Only reprocess records updated after this time
+	BatchSize       int       // Number of records to process per batch (defaults to 100)
 }
 
 // ReprocessStats tracks progress of reprocessing operation.
@@ -112,8 +113,12 @@ func ReprocessFromDB(
 		reparsed.ParserVersion = opts.TargetVersion
 		reparsed.LastParsedAt = time.Now()
 
-		// Re-validate with Smarty if available and data changed
-		if smarty != nil && reparsed.DataHash != mb.DataHash {
+		// Re-validate with Smarty if:
+		// 1. Data changed (DataHash different), OR
+		// 2. ForceRevalidate option is enabled (useful when switching from mock to real API)
+		needsRevalidation := reparsed.DataHash != mb.DataHash || opts.ForceRevalidate
+
+		if smarty != nil && needsRevalidation {
 			validated, err := smarty.ValidateMailbox(ctx, reparsed)
 			if err == nil {
 				reparsed = validated
@@ -122,7 +127,7 @@ func ReprocessFromDB(
 				logFn(fmt.Sprintf("smarty validation failed for %s: %v", link, err))
 			}
 		} else {
-			// Keep existing validation if data unchanged
+			// Keep existing validation if data unchanged and not forcing revalidation
 			reparsed.CMRA = mb.CMRA
 			reparsed.RDI = mb.RDI
 			reparsed.StandardizedAddress = mb.StandardizedAddress

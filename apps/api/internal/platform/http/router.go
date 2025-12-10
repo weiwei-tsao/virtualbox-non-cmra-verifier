@@ -193,8 +193,9 @@ func (r *Router) listCrawlRuns(c *gin.Context) {
 }
 
 type reprocessReq struct {
-	TargetVersion string `json:"targetVersion"` // Optional: parser version to update to (defaults to current)
-	OnlyOutdated  bool   `json:"onlyOutdated"`  // Optional: only reprocess records with different parser version
+	TargetVersion   string `json:"targetVersion"`   // Optional: parser version to update to (defaults to current)
+	OnlyOutdated    bool   `json:"onlyOutdated"`    // Optional: only reprocess records with different parser version
+	ForceRevalidate bool   `json:"forceRevalidate"` // Optional: force Smarty re-validation even if data unchanged (for mock->real API switch)
 }
 
 func (r *Router) reprocessMailboxes(c *gin.Context) {
@@ -205,8 +206,9 @@ func (r *Router) reprocessMailboxes(c *gin.Context) {
 	}
 
 	opts := crawler.ReprocessOptions{
-		TargetVersion: req.TargetVersion,
-		OnlyOutdated:  req.OnlyOutdated,
+		TargetVersion:   req.TargetVersion,
+		OnlyOutdated:    req.OnlyOutdated,
+		ForceRevalidate: req.ForceRevalidate,
 	}
 
 	runID, err := r.crawler.Reprocess(c.Request.Context(), opts)

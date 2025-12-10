@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
@@ -17,6 +19,8 @@ import (
 var (
 	// ErrCircuitOpen signals the breaker is open after repeated 402/429 responses.
 	ErrCircuitOpen = errors.New("smarty circuit open due to repeated rate/limit errors")
+	// ErrAllCredentialsExhausted signals all credentials have hit their circuit breaker.
+	ErrAllCredentialsExhausted = errors.New("all smarty credentials exhausted")
 )
 
 // HTTPClient matches net/http.Client Do signature for testability.
@@ -24,30 +28,37 @@ type HTTPClient interface {
 	Do(req *http.Request) (*http.Response, error)
 }
 
-// Client wraps Smarty calls with retry and circuit breaker support.
-type Client struct {
-	authID     string
-	authToken  string
-	baseURL    string
-	httpClient HTTPClient
-	mock       bool
+// credential represents a single Smarty API account.
+type credential struct {
+	authID           string
+	authToken        string
+	consecutiveLimit int // Circuit breaker counter for this credential
+}
 
+// Client wraps Smarty calls with retry and circuit breaker support.
+// Supports multiple credentials with round-robin load balancing.
+type Client struct {
+	credentials      []credential
+	currentIndex     int // Round-robin index
+	mu               sync.Mutex
+	baseURL          string
+	httpClient       HTTPClient
+	mock             bool
 	maxRetries       int
 	breakerThreshold int
-	consecutiveLimit int
 }
 
 // Config defines settings for the Smarty client.
 type Config struct {
-	AuthID     string
-	AuthToken  string
+	AuthIDs    []string // Multiple auth IDs for load balancing
+	AuthTokens []string // Multiple auth tokens (must match IDs length)
 	BaseURL    string
 	Mock       bool
 	MaxRetries int
 	BreakerMax int
 }
 
-// New creates a Smarty client.
+// New creates a Smarty client with support for multiple credentials.
 func New(httpClient HTTPClient, cfg Config) *Client {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -65,9 +76,18 @@ func New(httpClient HTTPClient, cfg Config) *Client {
 		breaker = 5
 	}
 
+	// Build credentials slice from AuthIDs and AuthTokens
+	credentials := make([]credential, len(cfg.AuthIDs))
+	for i := range cfg.AuthIDs {
+		credentials[i] = credential{
+			authID:    cfg.AuthIDs[i],
+			authToken: cfg.AuthTokens[i],
+		}
+	}
+
 	return &Client{
-		authID:           cfg.AuthID,
-		authToken:        cfg.AuthToken,
+		credentials:      credentials,
+		currentIndex:     0,
 		baseURL:          base,
 		httpClient:       httpClient,
 		mock:             cfg.Mock,
@@ -77,6 +97,7 @@ func New(httpClient HTTPClient, cfg Config) *Client {
 }
 
 // ValidateMailbox calls Smarty (or mock) to enrich mailbox data.
+// Uses round-robin load balancing across multiple credentials.
 func (c *Client) ValidateMailbox(ctx context.Context, mailbox model.Mailbox) (model.Mailbox, error) {
 	if c.mock {
 		mailbox.CMRA = "Y"
@@ -89,56 +110,127 @@ func (c *Client) ValidateMailbox(ctx context.Context, mailbox model.Mailbox) (mo
 		return mailbox, nil
 	}
 
-	if c.consecutiveLimit >= c.breakerThreshold {
-		return mailbox, ErrCircuitOpen
+	if len(c.credentials) == 0 {
+		return mailbox, errors.New("no smarty credentials configured")
 	}
 
+	// Try each credential in round-robin order
+	startIndex := c.getNextCredentialIndex()
+	triedCount := 0
+
+	for triedCount < len(c.credentials) {
+		credIndex := (startIndex + triedCount) % len(c.credentials)
+		cred := &c.credentials[credIndex]
+
+		// Check if this credential's circuit breaker is open
+		if cred.consecutiveLimit >= c.breakerThreshold {
+			log.Printf("Credential %s circuit breaker open (%d/%d), trying next",
+				maskAuthID(cred.authID), cred.consecutiveLimit, c.breakerThreshold)
+			triedCount++
+			continue
+		}
+
+		// Try validation with this credential
+		result, err := c.validateWithCredential(ctx, mailbox, cred)
+		if err == nil {
+			// Success - reset circuit breaker and return
+			cred.consecutiveLimit = 0
+			return result, nil
+		}
+
+		// Check if error is rate limit or quota exhausted
+		if errors.Is(err, ErrCircuitOpen) {
+			log.Printf("Credential %s hit circuit breaker, trying next", maskAuthID(cred.authID))
+			triedCount++
+			continue
+		}
+
+		// For other errors, return immediately
+		return mailbox, err
+	}
+
+	// All credentials exhausted
+	return mailbox, ErrAllCredentialsExhausted
+}
+
+// getNextCredentialIndex returns the next credential index using round-robin.
+func (c *Client) getNextCredentialIndex() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	index := c.currentIndex
+	c.currentIndex = (c.currentIndex + 1) % len(c.credentials)
+	return index
+}
+
+// validateWithCredential performs validation using a specific credential.
+func (c *Client) validateWithCredential(ctx context.Context, mailbox model.Mailbox, cred *credential) (model.Mailbox, error) {
 	params := url.Values{}
-	params.Set("auth-id", c.authID)
-	params.Set("auth-token", c.authToken)
+	params.Set("auth-id", cred.authID)
+	params.Set("auth-token", cred.authToken)
 	params.Set("street", mailbox.AddressRaw.Street)
 	params.Set("city", mailbox.AddressRaw.City)
 	params.Set("state", mailbox.AddressRaw.State)
 	params.Set("zipcode", mailbox.AddressRaw.Zip)
 
 	endpoint := fmt.Sprintf("%s?%s", c.baseURL, params.Encode())
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
-	if err != nil {
-		return mailbox, fmt.Errorf("build request: %w", err)
-	}
-	req.Header.Set("Accept", "application/json")
 
 	for attempt := 0; attempt < c.maxRetries; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return mailbox, fmt.Errorf("build request: %w", err)
+		}
+		req.Header.Set("Accept", "application/json")
+
 		resp, err := c.httpClient.Do(req)
 		if err != nil {
 			if attempt == c.maxRetries-1 {
 				return mailbox, fmt.Errorf("request: %w", err)
 			}
+			time.Sleep(100 * time.Millisecond) // Brief backoff
 			continue
 		}
 		defer resp.Body.Close()
 
 		if resp.StatusCode == http.StatusOK {
-			c.consecutiveLimit = 0
 			return decodeSmartyResponse(mailbox, resp.Body)
 		}
 
+		// Handle rate limiting or quota exhaustion
 		if resp.StatusCode == http.StatusPaymentRequired || resp.StatusCode == http.StatusTooManyRequests {
-			c.consecutiveLimit++
-			if c.consecutiveLimit >= c.breakerThreshold {
+			c.mu.Lock()
+			cred.consecutiveLimit++
+			limit := cred.consecutiveLimit
+			c.mu.Unlock()
+
+			log.Printf("Credential %s rate limited (status %d), count: %d/%d",
+				maskAuthID(cred.authID), resp.StatusCode, limit, c.breakerThreshold)
+
+			if limit >= c.breakerThreshold {
 				return mailbox, ErrCircuitOpen
 			}
+
+			time.Sleep(500 * time.Millisecond) // Backoff before retry
 			continue
 		}
 
-		// For other errors, read body for context.
+		// For other errors, read body for context
 		body, _ := io.ReadAll(resp.Body)
 		if attempt == c.maxRetries-1 {
 			return mailbox, fmt.Errorf("smarty status %d: %s", resp.StatusCode, string(body))
 		}
+
+		time.Sleep(200 * time.Millisecond) // Backoff before retry
 	}
 
-	return mailbox, fmt.Errorf("smarty validation failed after retries")
+	return mailbox, fmt.Errorf("smarty validation failed after %d retries", c.maxRetries)
+}
+
+// maskAuthID masks the auth ID for logging (shows first 8 chars only).
+func maskAuthID(authID string) string {
+	if len(authID) <= 8 {
+		return authID
+	}
+	return authID[:8] + "..."
 }
 
 func decodeSmartyResponse(mailbox model.Mailbox, body io.Reader) (model.Mailbox, error) {

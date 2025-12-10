@@ -49,10 +49,15 @@ func main() {
 
 	fetcher := crawler.NewHTTPFetcher()
 	validator := smarty.New(nil, smarty.Config{
-		AuthID:    cfg.SmartyAuthID,
-		AuthToken: cfg.SmartyAuthToken,
-		Mock:      cfg.SmartyMock,
+		AuthIDs:    cfg.SmartyAuthIDs,
+		AuthTokens: cfg.SmartyAuthTokens,
+		Mock:       cfg.SmartyMock,
 	})
+	if cfg.SmartyMock {
+		log.Printf("Smarty client initialized in MOCK mode")
+	} else {
+		log.Printf("Smarty client initialized with %d credential(s) for load balancing", len(cfg.SmartyAuthIDs))
+	}
 	crawlService := crawler.NewService(fetcher, validator, mailboxRepo, runRepo, statsRepo, 5, cfg.CrawlLinkSeeds)
 
 	router := apirouter.NewRouter(mailboxRepo, runRepo, statsRepo, crawlService, cfg.AllowedOrigins)
