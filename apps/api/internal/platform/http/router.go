@@ -47,6 +47,9 @@ func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepo
 		api.POST("/crawl/reprocess", r.reprocessMailboxes)
 		api.GET("/crawl/status", r.getCrawlStatus)
 		api.GET("/crawl/runs", r.listCrawlRuns)
+
+		// iPost1 specific endpoints
+		api.POST("/crawl/ipost1/run", r.startIPost1Crawl)
 	}
 
 	return router
@@ -220,5 +223,17 @@ func (r *Router) reprocessMailboxes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"runId":   runID,
 		"message": "Reprocessing started. Check status with GET /api/crawl/status?runId=" + runID,
+	})
+}
+
+func (r *Router) startIPost1Crawl(c *gin.Context) {
+	runID, err := r.crawler.StartIPost1Crawl(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"runId":   runID,
+		"message": "iPost1 crawl started. Check status with GET /api/crawl/status?runId=" + runID,
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/crawler/ipost1"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/repository"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
 )
@@ -48,7 +49,7 @@ func (s *Service) Start(ctx context.Context, links []string) (string, error) {
 	}
 	startTime := time.Now().UTC()
 	runID := generateRunID()
-	if err := StartRun(ctx, s.runs, runID, startTime); err != nil {
+	if err := StartRun(ctx, s.runs, runID, "ATMB", startTime); err != nil {
 		return "", err
 	}
 	// Guard long-running crawls to avoid stuck runs.
@@ -70,7 +71,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 			status = "failed"
 			log.Printf("crawl panic run %s: %v", runID, rec)
 		}
-		if err := FinishRun(ctx, s.runs, runID, stats, status, startedAt); err != nil {
+		if err := FinishRun(ctx, s.runs, runID, "ATMB", stats, status, startedAt); err != nil {
 			log.Printf("finish run %s: %v", runID, err)
 		}
 	}()
@@ -121,7 +122,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 	stats.Validated = scrapeStats.Validated
 	stats.Failed = scrapeStats.Failed
 
-	if err := MarkAndSweep(ctx, s.mailboxes, runID); err != nil {
+	if err := MarkAndSweep(ctx, s.mailboxes, runID, "ATMB"); err != nil {
 		status = "partial_halt"
 		log.Printf("mark and sweep error run %s: %v", runID, err)
 	}
@@ -157,7 +158,7 @@ func (s *Service) Reprocess(ctx context.Context, opts ReprocessOptions) (string,
 	runID := generateRunID()
 	startTime := time.Now().UTC()
 
-	if err := StartRun(ctx, s.runs, runID, startTime); err != nil {
+	if err := StartRun(ctx, s.runs, runID, "ATMB", startTime); err != nil {
 		return "", err
 	}
 
@@ -181,7 +182,7 @@ func (s *Service) executeReprocess(ctx context.Context, runID string, opts Repro
 			status = "failed"
 			log.Printf("reprocess panic run %s: %v", runID, rec)
 		}
-		if err := FinishRun(ctx, s.runs, runID, stats, status, startedAt); err != nil {
+		if err := FinishRun(ctx, s.runs, runID, "ATMB", stats, status, startedAt); err != nil {
 			log.Printf("finish run %s: %v", runID, err)
 		}
 	}()
@@ -231,4 +232,143 @@ func (s *Service) executeReprocess(ctx context.Context, runID string, opts Repro
 			log.Printf("save system stats error run %s: %v", runID, err)
 		}
 	}
+}
+
+// StartIPost1Crawl kicks off an iPost1 crawl run asynchronously.
+func (s *Service) StartIPost1Crawl(ctx context.Context) (string, error) {
+	startTime := time.Now().UTC()
+	runID := generateRunID()
+	if err := StartRun(ctx, s.runs, runID, "iPost1", startTime); err != nil {
+		return "", err
+	}
+
+	// Guard long-running crawls
+	runCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	go func() {
+		defer cancel()
+		s.executeIPost1(runCtx, runID, startTime)
+	}()
+	return runID, nil
+}
+
+func (s *Service) executeIPost1(ctx context.Context, runID string, startedAt time.Time) {
+	status := "running"
+	stats := model.CrawlRunStats{}
+
+	// Always finalize the run document
+	defer func() {
+		if rec := recover(); rec != nil {
+			status = "failed"
+			log.Printf("ipost1 crawl panic run %s: %v", runID, rec)
+		}
+		if err := FinishRun(ctx, s.runs, runID, "iPost1", stats, status, startedAt); err != nil {
+			log.Printf("finish run %s: %v", runID, err)
+		}
+	}()
+
+	// Import iPost1 package - note: this creates a dependency
+	// Using a separate adapter to avoid direct import
+	ipostStats, err := s.executeIPost1Discovery(ctx, runID)
+	if err != nil {
+		status = "failed"
+		log.Printf("ipost1 discovery error run %s: %v", runID, err)
+	} else {
+		status = "success"
+	}
+
+	// Map iPost1 stats to CrawlRunStats
+	stats.Found = ipostStats.Found
+	stats.Validated = ipostStats.Validated
+	stats.Skipped = ipostStats.Skipped
+	stats.Failed = ipostStats.Failed
+
+	// Mark and sweep for iPost1 source only
+	if err := MarkAndSweep(ctx, s.mailboxes, runID, "iPost1"); err != nil {
+		status = "partial_halt"
+		log.Printf("mark and sweep error run %s: %v", runID, err)
+	}
+
+	// If nothing was processed successfully, mark as failed
+	if stats.Validated == 0 && stats.Skipped == 0 && stats.Found > 0 && stats.Failed >= stats.Found {
+		status = "failed"
+	}
+
+	// Update system stats
+	all, err := s.mailboxes.FetchAllMap(ctx)
+	if err == nil {
+		var list []model.Mailbox
+		for _, m := range all {
+			list = append(list, m)
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i].Link < list[j].Link })
+		sysStats := AggregateSystemStats(list)
+		if err := s.statsRepo.SaveSystemStats(ctx, sysStats); err != nil {
+			log.Printf("save system stats error run %s: %v", runID, err)
+		}
+	}
+}
+
+// IPost1Stats represents statistics from iPost1 crawl (to avoid circular import).
+type IPost1Stats struct {
+	Found     int
+	Validated int
+	Skipped   int
+	Failed    int
+}
+
+func (s *Service) executeIPost1Discovery(ctx context.Context, runID string) (IPost1Stats, error) {
+	// Import ipost1 discovery dynamically to avoid tight coupling
+	// Note: You could also inject this as a dependency in NewService
+	stats, err := s.runIPost1ProcessAndValidate(ctx, runID)
+	if err != nil {
+		return IPost1Stats{}, err
+	}
+
+	return IPost1Stats{
+		Found:     stats.Found,
+		Validated: stats.Validated,
+		Skipped:   stats.Skipped,
+		Failed:    stats.Failed,
+	}, nil
+}
+
+// runIPost1ProcessAndValidate executes the iPost1 discovery and validation process.
+// This method acts as an adapter between the Service and the ipost1 package.
+func (s *Service) runIPost1ProcessAndValidate(ctx context.Context, runID string) (struct {
+	Found     int
+	Validated int
+	Skipped   int
+	Failed    int
+}, error) {
+	// Call iPost1 ProcessAndValidate with proper adapters
+	stats, err := ipost1.ProcessAndValidate(
+		ctx,
+		s.validator, // Already implements the ValidationClient interface
+		s.mailboxes, // Already implements the MailboxStore interface
+		runID,
+		func(msg string) {
+			log.Printf("run %s: %s", runID, msg)
+		},
+	)
+
+	if err != nil {
+		return struct {
+			Found     int
+			Validated int
+			Skipped   int
+			Failed    int
+		}{}, err
+	}
+
+	return struct {
+		Found     int
+		Validated int
+		Skipped   int
+		Failed    int
+	}{
+		Found:     stats.Found,
+		Validated: stats.Validated,
+		Skipped:   stats.Skipped,
+		Failed:    stats.Failed,
+	}, nil
 }

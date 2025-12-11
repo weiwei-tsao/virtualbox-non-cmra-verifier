@@ -30,6 +30,39 @@
         { "fieldPath": "parserVersion", "order": "ASCENDING" },
         { "fieldPath": "lastParsedAt", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "mailboxes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mailboxes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "active", "order": "ASCENDING" },
+        { "fieldPath": "addressRaw.state", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mailboxes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "cmra", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mailboxes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "source", "order": "ASCENDING" },
+        { "fieldPath": "rdi", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

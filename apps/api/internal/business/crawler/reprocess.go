@@ -105,6 +105,7 @@ func ReprocessFromDB(
 
 		// Preserve original metadata and update parsed fields
 		reparsed.ID = mb.ID
+		reparsed.Source = mb.Source // Preserve original source (ATMB or iPost1)
 		reparsed.Link = link
 		reparsed.RawHTML = mb.RawHTML // Keep original HTML
 		reparsed.CrawlRunID = mb.CrawlRunID

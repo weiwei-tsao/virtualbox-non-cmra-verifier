@@ -103,6 +103,7 @@ func ScrapeAndUpsert(
 		}
 
 		// Set metadata fields
+		parsed.Source = "ATMB" // Mark as ATMB source
 		parsed.DataHash = util.HashMailboxKey(parsed.Name, parsed.AddressRaw)
 		if parsed.Link == "" {
 			parsed.Link = link
