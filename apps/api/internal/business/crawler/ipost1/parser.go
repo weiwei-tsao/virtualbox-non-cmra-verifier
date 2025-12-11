@@ -50,8 +50,12 @@ func ParseLocationsHTML(htmlContent string) ([]model.Mailbox, error) {
 			link = BaseURL + link
 		}
 
-		// Only add if we have minimum required fields
-		if name != "" && street != "" && city != "" {
+		// Only add if we have minimum required fields (name is optional for API responses)
+		if street != "" && city != "" {
+			// Use street as name if name is not available (common in API responses)
+			if name == "" {
+				name = fmt.Sprintf("iPost1 - %s, %s", city, state)
+			}
 			mb.Name = name
 			mb.AddressRaw = model.AddressRaw{
 				Street: street,

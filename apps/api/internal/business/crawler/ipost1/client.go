@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/chromedp/chromedp"
@@ -34,8 +35,18 @@ type Client struct {
 
 // NewClient creates a new iPost1 client with a browser context.
 func NewClient() (*Client, error) {
-	// Create chromedp context
-	ctx, cancel := chromedp.NewContext(context.Background())
+	// Create chromedp options to avoid Cloudflare detection
+	opts := append(chromedp.DefaultExecAllocatorOptions[:],
+		chromedp.Flag("headless", true),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		chromedp.WindowSize(1920, 1080),
+	)
+
+	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
+
+	// Create chromedp context with the custom allocator
+	ctx, cancel := chromedp.NewContext(allocCtx)
 
 	// Set a reasonable timeout for the entire browser session
 	ctx, timeoutCancel := context.WithTimeout(ctx, 30*time.Minute)
@@ -45,6 +56,7 @@ func NewClient() (*Client, error) {
 		cancel: func() {
 			timeoutCancel()
 			cancel()
+			allocCancel()
 		},
 	}, nil
 }
@@ -61,9 +73,10 @@ func (c *Client) GetStates() ([]StateResponse, error) {
 	var states []StateResponse
 
 	// First, visit the homepage to establish session (bypass Cloudflare)
+	// Wait longer for Cloudflare challenge to complete
 	if err := chromedp.Run(c.ctx,
 		chromedp.Navigate(BaseURL),
-		chromedp.Sleep(3*time.Second), // Wait for Cloudflare check
+		chromedp.Sleep(8*time.Second), // Increased wait time for Cloudflare
 	); err != nil {
 		return nil, fmt.Errorf("failed to visit homepage: %w", err)
 	}
@@ -72,12 +85,15 @@ func (c *Client) GetStates() ([]StateResponse, error) {
 	var responseBody string
 	err := chromedp.Run(c.ctx,
 		chromedp.Navigate(BaseURL+StatesEndpoint),
-		chromedp.Sleep(2*time.Second),
+		chromedp.Sleep(3*time.Second), // Increased wait time
 		chromedp.Text("body", &responseBody, chromedp.NodeVisible),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch states: %w", err)
 	}
+
+	// Clean up response (Text mode should give us proper JSON)
+	responseBody = strings.TrimSpace(responseBody)
 
 	// Parse JSON response
 	if err := json.Unmarshal([]byte(responseBody), &states); err != nil {
@@ -93,20 +109,48 @@ func (c *Client) GetLocationsByState(stateID string) (LocationsResponse, error) 
 
 	url := BaseURL + fmt.Sprintf(LocationsEndpoint, stateID)
 
-	var responseBody string
+	// Get the raw HTML response
+	var rawHTML string
 	err := chromedp.Run(c.ctx,
 		chromedp.Navigate(url),
-		chromedp.Sleep(2*time.Second),
-		chromedp.Text("body", &responseBody, chromedp.NodeVisible),
+		chromedp.Sleep(3*time.Second),
+		chromedp.InnerHTML("body", &rawHTML, chromedp.NodeVisible),
 	)
 	if err != nil {
 		return response, fmt.Errorf("failed to fetch locations for state %s: %w", stateID, err)
 	}
 
-	// Parse JSON response
-	if err := json.Unmarshal([]byte(responseBody), &response); err != nil {
-		return response, fmt.Errorf("failed to parse locations JSON: %w", err)
+	// The API returns malformed JSON that can't be parsed by any standard parser.
+	// Instead of parsing JSON, we'll extract the display HTML content using string operations.
+	// The format is: {"num_results":X,"num_results_text":"...","display":"<HTML>","searched":"","back":"..."}
+
+	// Find the display field content between "display":" and ","searched"
+	displayStart := strings.Index(rawHTML, `"display":"`)
+	if displayStart == -1 {
+		// No display field - might be empty result
+		return response, nil
+	}
+	displayStart += len(`"display":"`)
+
+	// Find the end marker
+	displayEnd := strings.Index(rawHTML[displayStart:], `","searched"`)
+	if displayEnd == -1 {
+		return response, fmt.Errorf("malformed response for state %s: no searched field", stateID)
 	}
 
+	// Extract and unescape the HTML content
+	displayHTML := rawHTML[displayStart : displayStart+displayEnd]
+
+	// Unescape in correct order to avoid double-quotes
+	// The malformed JSON has both \" and &quot; which creates ""
+	// First remove the problematic \&quot; sequences (these are extraneous)
+	displayHTML = strings.ReplaceAll(displayHTML, `\&quot;`, ``)
+	displayHTML = strings.ReplaceAll(displayHTML, `&quot;`, ``)
+	// Then unescape standard JSON escapes (including escaped backslashes)
+	displayHTML = strings.ReplaceAll(displayHTML, `\\`, `\`)
+	displayHTML = strings.ReplaceAll(displayHTML, `\n`, "\n")
+	displayHTML = strings.ReplaceAll(displayHTML, `\"`, `"`)
+
+	response.Display = displayHTML
 	return response, nil
 }
