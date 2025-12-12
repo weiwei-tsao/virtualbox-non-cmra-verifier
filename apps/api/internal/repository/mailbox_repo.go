@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"cloud.google.com/go/firestore"
+	firestorepb "cloud.google.com/go/firestore/apiv1/firestorepb"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/util"
 	"google.golang.org/api/iterator"
@@ -145,22 +146,17 @@ func (r *MailboxRepository) List(ctx context.Context, q MailboxQuery) ([]model.M
 		query = query.Where("active", "==", *q.Active)
 	}
 
-	// Count total by iterating; acceptable for moderate data sizes.
-	total := 0
-	iter := query.Documents(ctx)
-	for {
-		_, err := iter.Next()
-		if err == iterator.Done {
-			break
-		}
-		if err != nil {
-			return nil, 0, fmt.Errorf("count mailboxes: %w", err)
-		}
-		total++
+	// Use Firestore Aggregation Count API for efficient counting (SDK v1.11+)
+	countQuery := query.NewAggregationQuery().WithCount("total")
+	countResult, err := countQuery.Get(ctx)
+	if err != nil {
+		return nil, 0, fmt.Errorf("count mailboxes: %w", err)
 	}
+	countValue := countResult["total"].(*firestorepb.Value)
+	total := int(countValue.GetIntegerValue())
 
 	offset := (q.Page - 1) * q.PageSize
-	iter = query.Offset(offset).Limit(q.PageSize).Documents(ctx)
+	iter := query.Offset(offset).Limit(q.PageSize).Documents(ctx)
 
 	var items []model.Mailbox
 	for {

@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Mailbox, MailboxFilter } from '../types';
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { MailboxFilter } from '../types';
 import { api } from '../services/api';
-import { Download, Search, Filter, Building2, Home, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Download, Search, Building2, Home, CheckCircle2 } from 'lucide-react';
+import { US_STATES, SOURCE_OPTIONS, RDI_OPTIONS } from '../constants';
 
 export const Mailboxes: React.FC = () => {
-  const [data, setData] = useState<Mailbox[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [stateOptions, setStateOptions] = useState<string[]>([]);
   const [filter, setFilter] = useState<MailboxFilter>({
     page: 1,
     pageSize: 10,
@@ -15,33 +13,15 @@ export const Mailboxes: React.FC = () => {
     search: ''
   });
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const res = await api.getMailboxes(filter);
-      setData(res.items);
-      setTotal(res.total);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Use React Query for data fetching with caching
+  const { data: queryData, isLoading: loading } = useQuery({
+    queryKey: ['mailboxes', filter],
+    queryFn: () => api.getMailboxes(filter),
+    placeholderData: (previousData) => previousData, // Keep previous data while fetching
+  });
 
-  useEffect(() => {
-    api.getStats()
-      .then((stats) => {
-        const states = stats.byState.map((s) => s.name).filter(Boolean);
-        const unique = Array.from(new Set(states)).sort();
-        setStateOptions(unique);
-      })
-      .catch((err) => console.error(err));
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  const data = queryData?.items ?? [];
+  const total = queryData?.total ?? 0;
 
   const handleExport = () => {
     api.exportCSV();
@@ -107,8 +87,9 @@ export const Mailboxes: React.FC = () => {
             onChange={(e) => setFilter({ ...filter, source: e.target.value as any, page: 1 })}
           >
             <option value="">All Sources</option>
-            <option value="ATMB">ATMB</option>
-            <option value="iPost1">iPost1</option>
+            {SOURCE_OPTIONS.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
           </select>
 
           <select
@@ -117,8 +98,8 @@ export const Mailboxes: React.FC = () => {
             onChange={(e) => setFilter({ ...filter, state: e.target.value, page: 1 })}
           >
             <option value="">All States</option>
-            {stateOptions.map((s) => (
-              <option key={s} value={s}>{s}</option>
+            {US_STATES.map((s) => (
+              <option key={s.code} value={s.code}>{s.code} - {s.name}</option>
             ))}
           </select>
 
@@ -128,8 +109,9 @@ export const Mailboxes: React.FC = () => {
             onChange={(e) => setFilter({ ...filter, rdi: e.target.value as any, page: 1 })}
           >
             <option value="">All Types</option>
-            <option value="Residential">Residential</option>
-            <option value="Commercial">Commercial</option>
+            {RDI_OPTIONS.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
           </select>
         </div>
       </div>
