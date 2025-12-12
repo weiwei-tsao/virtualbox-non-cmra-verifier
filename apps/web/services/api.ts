@@ -60,12 +60,40 @@ export const api = {
       name,
       value: Number(value),
     }));
+    const bySource = Object.entries(data.bySource || {}).map(([name, value]) => ({
+      name,
+      value: Number(value),
+    }));
     return {
       totalMailboxes: data.totalMailboxes || 0,
       commercialCount: data.totalCommercial || 0,
       residentialCount: data.totalResidential || 0,
       avgPrice: data.avgPrice || 0,
       byState,
+      bySource,
+      lastUpdated: data.lastUpdated,
+    };
+  },
+
+  refreshStats: async (): Promise<Stats> => {
+    const res = await request('/api/stats/refresh', { method: 'POST' });
+    const data = await res.json();
+    const byState = Object.entries(data.byState || {}).map(([name, value]) => ({
+      name,
+      value: Number(value),
+    }));
+    const bySource = Object.entries(data.bySource || {}).map(([name, value]) => ({
+      name,
+      value: Number(value),
+    }));
+    return {
+      totalMailboxes: data.totalMailboxes || 0,
+      commercialCount: data.totalCommercial || 0,
+      residentialCount: data.totalResidential || 0,
+      avgPrice: data.avgPrice || 0,
+      byState,
+      bySource,
+      lastUpdated: data.lastUpdated,
     };
   },
 

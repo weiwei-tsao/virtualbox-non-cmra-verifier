@@ -43,6 +43,7 @@ func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepo
 		api.GET("/mailboxes", r.listMailboxes)
 		api.GET("/mailboxes/export", r.exportMailboxes)
 		api.GET("/stats", r.getStats)
+		api.POST("/stats/refresh", r.refreshStats)
 		api.POST("/crawl/run", r.startCrawl)
 		api.POST("/crawl/reprocess", r.reprocessMailboxes)
 		api.GET("/crawl/status", r.getCrawlStatus)
@@ -153,6 +154,34 @@ func (r *Router) getStats(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, stats)
+}
+
+func (r *Router) refreshStats(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Fetch all mailboxes
+	all, err := r.mailboxes.FetchAllMap(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch mailboxes: " + err.Error()})
+		return
+	}
+
+	// Convert map to slice
+	var list []model.Mailbox
+	for _, m := range all {
+		list = append(list, m)
+	}
+
+	// Aggregate stats
+	sysStats := crawler.AggregateSystemStats(list)
+
+	// Save stats
+	if err := r.stats.SaveSystemStats(ctx, sysStats); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save stats: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, sysStats)
 }
 
 type startCrawlReq struct {

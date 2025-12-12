@@ -70,4 +70,5 @@ type SystemStats struct {
 	TotalResidential int            `json:"totalResidential,omitempty" firestore:"totalResidential,omitempty"`
 	AvgPrice         float64        `json:"avgPrice,omitempty" firestore:"avgPrice,omitempty"`
 	ByState          map[string]int `json:"byState,omitempty" firestore:"byState,omitempty"`
+	BySource         map[string]int `json:"bySource,omitempty" firestore:"bySource,omitempty"`
 }

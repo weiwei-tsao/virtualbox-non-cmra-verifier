@@ -50,4 +50,6 @@ export interface Stats {
   residentialCount: number;
   avgPrice: number;
   byState: { name: string; value: number }[];
+  bySource: { name: string; value: number }[];
+  lastUpdated?: string;
 }
