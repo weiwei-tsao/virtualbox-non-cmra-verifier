@@ -150,6 +150,8 @@ func (c *Client) GetLocationsByState(stateID string) (LocationsResponse, error) 
 	displayHTML = strings.ReplaceAll(displayHTML, `\\`, `\`)
 	displayHTML = strings.ReplaceAll(displayHTML, `\n`, "\n")
 	displayHTML = strings.ReplaceAll(displayHTML, `\"`, `"`)
+	// Fix escaped HTML tags: <\/ -> </
+	displayHTML = strings.ReplaceAll(displayHTML, `<\/`, `</`)
 
 	response.Display = displayHTML
 	return response, nil

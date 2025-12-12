@@ -17,6 +17,7 @@ export interface Mailbox {
   standardizedAddress?: StandardizedAddress;
   lastValidatedAt?: string;
   crawlRunId?: string;
+  source?: 'ATMB' | 'iPost1' | string;
 }
 
 export interface CrawlRun {
@@ -37,6 +38,7 @@ export interface MailboxFilter {
   state?: string;
   cmra?: 'Y' | 'N';
   rdi?: 'Residential' | 'Commercial';
+  source?: 'ATMB' | 'iPost1';
   search?: string;
   page: number;
   pageSize: number;

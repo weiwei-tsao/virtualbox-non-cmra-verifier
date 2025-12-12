@@ -98,6 +98,7 @@ func (r *Router) listMailboxes(c *gin.Context) {
 		State:    c.Query("state"),
 		CMRA:     c.Query("cmra"),
 		RDI:      c.Query("rdi"),
+		Source:   c.Query("source"),
 		Active:   activePtr,
 		Page:     page,
 		PageSize: pageSize,

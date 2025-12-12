@@ -27,6 +27,7 @@ export const api = {
       state: filter.state,
       cmra: filter.cmra,
       rdi: filter.rdi,
+      source: filter.source,
       active: 'true',
       page: filter.page,
       pageSize: filter.pageSize,
@@ -47,6 +48,7 @@ export const api = {
       standardizedAddress: m.standardizedAddress,
       lastValidatedAt: m.lastValidatedAt,
       crawlRunId: m.crawlRunId,
+      source: m.source || 'Unknown',
     }));
     return { items, total: data.total || 0, page: data.page || filter.page };
   },

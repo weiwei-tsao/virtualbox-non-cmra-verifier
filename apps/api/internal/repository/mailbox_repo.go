@@ -113,6 +113,7 @@ type MailboxQuery struct {
 	State    string
 	CMRA     string
 	RDI      string
+	Source   string
 	Active   *bool
 	Page     int
 	PageSize int
@@ -136,6 +137,9 @@ func (r *MailboxRepository) List(ctx context.Context, q MailboxQuery) ([]model.M
 	}
 	if q.RDI != "" {
 		query = query.Where("rdi", "==", q.RDI)
+	}
+	if q.Source != "" {
+		query = query.Where("source", "==", q.Source)
 	}
 	if q.Active != nil {
 		query = query.Where("active", "==", *q.Active)
