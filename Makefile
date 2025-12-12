@@ -23,6 +23,23 @@ check-firestore: ## 检查 Firestore 数据
 	@echo "🔍 检查 Firestore 数据..."
 	cd apps/api && go run cmd/check-firestore/main.go
 
+# 迁移命令
+migrate-clean-dry: ## 预览 iPost1 地址清洗（dry-run）
+	@echo "🔍 预览 iPost1 地址清洗..."
+	cd apps/api && go run cmd/migrate-clean-addresses/main.go --dry-run --source=iPost1
+
+migrate-clean: ## 执行 iPost1 地址清洗
+	@echo "🧹 执行 iPost1 地址清洗..."
+	cd apps/api && go run cmd/migrate-clean-addresses/main.go --source=iPost1
+
+migrate-clean-all-dry: ## 预览所有来源地址清洗（dry-run）
+	@echo "🔍 预览所有来源地址清洗..."
+	cd apps/api && go run cmd/migrate-clean-addresses/main.go --dry-run --source=
+
+migrate-clean-all: ## 执行所有来源地址清洗
+	@echo "🧹 执行所有来源地址清洗..."
+	cd apps/api && go run cmd/migrate-clean-addresses/main.go --source=
+
 # 文档命令
 docs: ## 打开 iPost1 文档
 	@echo "📚 iPost1 相关文档:"

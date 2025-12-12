@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/util"
 )
 
 // DiscoverAll fetches all mailbox locations across all US states/territories.
@@ -120,6 +121,10 @@ func ProcessAndValidate(
 			return stats, ctx.Err()
 		default:
 		}
+
+		// Clean address data (remove HTML remnants from scraper)
+		mb.AddressRaw = util.CleanAddress(mb.AddressRaw)
+		mb.Link = util.CleanLink(mb.Link)
 
 		// Set metadata fields
 		mb.CrawlRunID = runID
