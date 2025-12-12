@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -17,12 +18,64 @@ var (
 // CleanAddress removes HTML remnants and normalizes an AddressRaw struct.
 // This function is designed to handle malformed data from web scrapers.
 func CleanAddress(addr model.AddressRaw) model.AddressRaw {
+	// First pass: clean HTML and escape sequences
+	street := cleanField(addr.Street)
+	city := cleanField(addr.City)
+	state := cleanField(addr.State)
+	zip := cleanField(addr.Zip)
+
+	// Second pass: remove redundant city/state/zip from street
+	street = removeRedundantCityStateZip(street, city, state, zip)
+
 	return model.AddressRaw{
-		Street: cleanField(addr.Street),
-		City:   cleanField(addr.City),
-		State:  cleanField(addr.State),
-		Zip:    cleanField(addr.Zip),
+		Street: street,
+		City:   city,
+		State:  state,
+		Zip:    zip,
 	}
+}
+
+// removeRedundantCityStateZip removes duplicate city, state, zip info from street field.
+// Example: "1601 29th St Boulder, CO 80301" -> "1601 29th St" (when city=Boulder, state=CO, zip=80301)
+func removeRedundantCityStateZip(street, city, state, zip string) string {
+	if street == "" || (city == "" && state == "") {
+		return street
+	}
+
+	// Build possible redundant suffixes (most specific to least specific)
+	var suffixes []string
+
+	if city != "" && state != "" && zip != "" {
+		// Full pattern: " Boulder, CO 80301"
+		suffixes = append(suffixes, fmt.Sprintf(" %s, %s %s", city, state, zip))
+		// Without comma: " Boulder CO 80301"
+		suffixes = append(suffixes, fmt.Sprintf(" %s %s %s", city, state, zip))
+	}
+
+	if state != "" && zip != "" {
+		// State and zip only: ", CO 80301"
+		suffixes = append(suffixes, fmt.Sprintf(", %s %s", state, zip))
+		// State and zip without comma: " CO 80301"
+		suffixes = append(suffixes, fmt.Sprintf(" %s %s", state, zip))
+	}
+
+	if city != "" && state != "" {
+		// City and state: " Boulder, CO"
+		suffixes = append(suffixes, fmt.Sprintf(" %s, %s", city, state))
+	}
+
+	// Try to remove each suffix (case-insensitive comparison)
+	streetLower := strings.ToLower(street)
+	for _, suffix := range suffixes {
+		suffixLower := strings.ToLower(suffix)
+		if strings.HasSuffix(streetLower, suffixLower) {
+			// Remove the suffix while preserving original case
+			street = street[:len(street)-len(suffix)]
+			break
+		}
+	}
+
+	return strings.TrimSpace(street)
 }
 
 // CleanStandardizedAddress removes HTML remnants from StandardizedAddress.
@@ -73,7 +126,7 @@ func cleanField(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// NeedsCleanup checks if an address contains HTML remnants that need cleaning.
+// NeedsCleanup checks if an address contains HTML remnants or redundant data that need cleaning.
 func NeedsCleanup(addr model.AddressRaw) bool {
 	fields := []string{addr.Street, addr.City, addr.State, addr.Zip}
 	for _, f := range fields {
@@ -84,5 +137,41 @@ func NeedsCleanup(addr model.AddressRaw) bool {
 			return true
 		}
 	}
+
+	// Check for redundant city/state/zip in street
+	if hasRedundantCityStateZip(addr.Street, addr.City, addr.State, addr.Zip) {
+		return true
+	}
+
+	return false
+}
+
+// hasRedundantCityStateZip checks if street contains redundant city/state/zip.
+func hasRedundantCityStateZip(street, city, state, zip string) bool {
+	if street == "" || (city == "" && state == "") {
+		return false
+	}
+
+	streetLower := strings.ToLower(street)
+
+	// Check for common redundant patterns
+	if city != "" && state != "" && zip != "" {
+		pattern := strings.ToLower(fmt.Sprintf(" %s, %s %s", city, state, zip))
+		if strings.HasSuffix(streetLower, pattern) {
+			return true
+		}
+		pattern = strings.ToLower(fmt.Sprintf(" %s %s %s", city, state, zip))
+		if strings.HasSuffix(streetLower, pattern) {
+			return true
+		}
+	}
+
+	if state != "" && zip != "" {
+		pattern := strings.ToLower(fmt.Sprintf(", %s %s", state, zip))
+		if strings.HasSuffix(streetLower, pattern) {
+			return true
+		}
+	}
+
 	return false
 }
