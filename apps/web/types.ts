@@ -24,7 +24,7 @@ export interface CrawlRun {
   id: string;
   startedAt: string;
   finishedAt?: string;
-  status: 'running' | 'success' | 'failed' | 'partial_halt';
+  status: 'running' | 'success' | 'failed' | 'partial_halt' | 'timeout' | 'cancelled';
   stats: {
     found: number;
     validated: number;

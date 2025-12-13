@@ -48,6 +48,7 @@ func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepo
 		api.POST("/crawl/reprocess", r.reprocessMailboxes)
 		api.GET("/crawl/status", r.getCrawlStatus)
 		api.GET("/crawl/runs", r.listCrawlRuns)
+		api.POST("/crawl/runs/:runId/cancel", r.cancelCrawlRun)
 
 		// iPost1 specific endpoints
 		api.POST("/crawl/ipost1/run", r.startIPost1Crawl)
@@ -223,6 +224,21 @@ func (r *Router) listCrawlRuns(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"items": runs})
+}
+
+func (r *Router) cancelCrawlRun(c *gin.Context) {
+	runID := c.Param("runId")
+	if runID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "runId is required"})
+		return
+	}
+
+	if err := r.runs.CancelRun(c.Request.Context(), runID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Run cancelled successfully", "runId": runID})
 }
 
 type reprocessReq struct {

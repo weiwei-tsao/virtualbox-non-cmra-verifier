@@ -132,7 +132,13 @@ export const api = {
       errorsSample: run.errorsSample || [],
     }));
   },
-  
+
+  cancelCrawlRun: async (runId: string): Promise<void> => {
+    await request(`/api/crawl/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST',
+    });
+  },
+
   exportCSV: async () => {
     const url = `${API_BASE}/api/mailboxes/export`;
     window.open(url, '_blank');
