@@ -7,6 +7,7 @@ func AggregateSystemStats(mailboxes []model.Mailbox) model.SystemStats {
 	var total, commercial, residential int
 	var priceSum float64
 	byState := make(map[string]int)
+	bySource := make(map[string]int)
 
 	for _, m := range mailboxes {
 		if !m.Active {
@@ -21,6 +22,9 @@ func AggregateSystemStats(mailboxes []model.Mailbox) model.SystemStats {
 			residential++
 		}
 		byState[m.AddressRaw.State]++
+		if m.Source != "" {
+			bySource[m.Source]++
+		}
 	}
 
 	var avgPrice float64
@@ -34,5 +38,6 @@ func AggregateSystemStats(mailboxes []model.Mailbox) model.SystemStats {
 		TotalResidential: residential,
 		AvgPrice:         avgPrice,
 		ByState:          byState,
+		BySource:         bySource,
 	}
 }

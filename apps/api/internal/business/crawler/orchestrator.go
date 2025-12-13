@@ -82,14 +82,16 @@ func (o *Orchestrator) Run(ctx context.Context, urls []string, fn WorkerFn) (<-c
 }
 
 // MarkAndSweep sets active=false for mailboxes whose crawlRunId != currentRunId.
-func MarkAndSweep(ctx context.Context, repo MailboxStore, currentRunID string) error {
+// Only affects mailboxes from the same source to prevent interference between different crawlers.
+func MarkAndSweep(ctx context.Context, repo MailboxStore, currentRunID string, source string) error {
 	all, err := repo.FetchAllMap(ctx)
 	if err != nil {
 		return err
 	}
 	var toUpdate []model.Mailbox
 	for _, m := range all {
-		if m.CrawlRunID != currentRunID && m.Active {
+		// Only process mailboxes from the same source
+		if m.Source == source && m.CrawlRunID != currentRunID && m.Active {
 			m.Active = false
 			toUpdate = append(toUpdate, m)
 		}
@@ -107,18 +109,20 @@ type RunLifecycleRepo interface {
 }
 
 // StartRun initializes a CrawlRun record.
-func StartRun(ctx context.Context, repo RunLifecycleRepo, runID string, startedAt time.Time) error {
+func StartRun(ctx context.Context, repo RunLifecycleRepo, runID string, source string, startedAt time.Time) error {
 	return repo.CreateRun(ctx, model.CrawlRun{
 		RunID:     runID,
+		Source:    source,
 		Status:    "running",
 		StartedAt: startedAt,
 	})
 }
 
 // FinishRun finalizes a CrawlRun record with stats and status.
-func FinishRun(ctx context.Context, repo RunLifecycleRepo, runID string, stats model.CrawlRunStats, status string, startedAt time.Time) error {
+func FinishRun(ctx context.Context, repo RunLifecycleRepo, runID string, source string, stats model.CrawlRunStats, status string, startedAt time.Time) error {
 	return repo.UpdateRun(ctx, model.CrawlRun{
 		RunID:      runID,
+		Source:     source,
 		Status:     status,
 		Stats:      stats,
 		StartedAt:  startedAt,

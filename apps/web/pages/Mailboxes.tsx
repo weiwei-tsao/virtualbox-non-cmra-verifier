@@ -1,13 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Mailbox, MailboxFilter } from '../types';
+import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { MailboxFilter } from '../types';
 import { api } from '../services/api';
-import { Download, Search, Filter, Building2, Home, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Download, Search, Building2, Home, CheckCircle2 } from 'lucide-react';
+import { US_STATES, SOURCE_OPTIONS, RDI_OPTIONS } from '../constants';
 
 export const Mailboxes: React.FC = () => {
-  const [data, setData] = useState<Mailbox[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [stateOptions, setStateOptions] = useState<string[]>([]);
   const [filter, setFilter] = useState<MailboxFilter>({
     page: 1,
     pageSize: 10,
@@ -15,33 +13,15 @@ export const Mailboxes: React.FC = () => {
     search: ''
   });
 
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      const res = await api.getMailboxes(filter);
-      setData(res.items);
-      setTotal(res.total);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Use React Query for data fetching with caching
+  const { data: queryData, isLoading: loading } = useQuery({
+    queryKey: ['mailboxes', filter],
+    queryFn: () => api.getMailboxes(filter),
+    placeholderData: (previousData) => previousData, // Keep previous data while fetching
+  });
 
-  useEffect(() => {
-    api.getStats()
-      .then((stats) => {
-        const states = stats.byState.map((s) => s.name).filter(Boolean);
-        const unique = Array.from(new Set(states)).sort();
-        setStateOptions(unique);
-      })
-      .catch((err) => console.error(err));
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  const data = queryData?.items ?? [];
+  const total = queryData?.total ?? 0;
 
   const handleExport = () => {
     api.exportCSV();
@@ -60,6 +40,13 @@ export const Mailboxes: React.FC = () => {
       return <span className="inline-flex items-center text-xs text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200">CMRA</span>
     }
     return <span className="inline-flex items-center text-xs text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded border border-slate-200">Not CMRA</span>
+  };
+
+  const getSourceBadge = (source: string) => {
+    if (source === 'iPost1') {
+      return <span className="inline-flex items-center text-xs text-purple-600 font-medium bg-purple-50 px-2 py-0.5 rounded border border-purple-200">iPost1</span>
+    }
+    return <span className="inline-flex items-center text-xs text-indigo-600 font-medium bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">ATMB</span>
   };
 
   return (
@@ -96,12 +83,23 @@ export const Mailboxes: React.FC = () => {
         <div className="flex space-x-2">
           <select
             className="block pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm rounded-md"
+            value={filter.source || ''}
+            onChange={(e) => setFilter({ ...filter, source: e.target.value as any, page: 1 })}
+          >
+            <option value="">All Sources</option>
+            {SOURCE_OPTIONS.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+
+          <select
+            className="block pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm rounded-md"
             value={filter.state || ''}
             onChange={(e) => setFilter({ ...filter, state: e.target.value, page: 1 })}
           >
             <option value="">All States</option>
-            {stateOptions.map((s) => (
-              <option key={s} value={s}>{s}</option>
+            {US_STATES.map((s) => (
+              <option key={s.code} value={s.code}>{s.code} - {s.name}</option>
             ))}
           </select>
 
@@ -111,8 +109,9 @@ export const Mailboxes: React.FC = () => {
             onChange={(e) => setFilter({ ...filter, rdi: e.target.value as any, page: 1 })}
           >
             <option value="">All Types</option>
-            <option value="Residential">Residential</option>
-            <option value="Commercial">Commercial</option>
+            {RDI_OPTIONS.map((r) => (
+              <option key={r} value={r}>{r}</option>
+            ))}
           </select>
         </div>
       </div>
@@ -128,6 +127,9 @@ export const Mailboxes: React.FC = () => {
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Address
+                </th>
+                <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Source
                 </th>
                 <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                   Type (RDI)
@@ -147,7 +149,7 @@ export const Mailboxes: React.FC = () => {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={6} className="px-6 py-4">
+                    <td colSpan={7} className="px-6 py-4">
                       <div className="animate-pulse flex space-x-4">
                         <div className="flex-1 space-y-2 py-1">
                           <div className="h-4 bg-gray-200 rounded w-3/4"></div>
@@ -158,7 +160,7 @@ export const Mailboxes: React.FC = () => {
                 ))
               ) : data.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-6 py-10 text-center text-gray-500">
+                  <td colSpan={7} className="px-6 py-10 text-center text-gray-500">
                     No mailboxes found matching your criteria.
                   </td>
                 </tr>
@@ -174,6 +176,9 @@ export const Mailboxes: React.FC = () => {
                     <td className="px-6 py-4">
                       <div className="text-sm text-gray-900">{item.street || 'N/A'}</div>
                       <div className="text-sm text-gray-500">{item.city || 'Unknown'}, {item.state || '--'} {item.zip || ''}</div>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {getSourceBadge(item.source || 'ATMB')}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       {getRDIBadge(item.rdi || 'Unknown')}

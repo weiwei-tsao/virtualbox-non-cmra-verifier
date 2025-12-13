@@ -27,6 +27,7 @@ export const api = {
       state: filter.state,
       cmra: filter.cmra,
       rdi: filter.rdi,
+      source: filter.source,
       active: 'true',
       page: filter.page,
       pageSize: filter.pageSize,
@@ -47,6 +48,7 @@ export const api = {
       standardizedAddress: m.standardizedAddress,
       lastValidatedAt: m.lastValidatedAt,
       crawlRunId: m.crawlRunId,
+      source: m.source || 'Unknown',
     }));
     return { items, total: data.total || 0, page: data.page || filter.page };
   },
@@ -58,12 +60,40 @@ export const api = {
       name,
       value: Number(value),
     }));
+    const bySource = Object.entries(data.bySource || {}).map(([name, value]) => ({
+      name,
+      value: Number(value),
+    }));
     return {
       totalMailboxes: data.totalMailboxes || 0,
       commercialCount: data.totalCommercial || 0,
       residentialCount: data.totalResidential || 0,
       avgPrice: data.avgPrice || 0,
       byState,
+      bySource,
+      lastUpdated: data.lastUpdated,
+    };
+  },
+
+  refreshStats: async (): Promise<Stats> => {
+    const res = await request('/api/stats/refresh', { method: 'POST' });
+    const data = await res.json();
+    const byState = Object.entries(data.byState || {}).map(([name, value]) => ({
+      name,
+      value: Number(value),
+    }));
+    const bySource = Object.entries(data.bySource || {}).map(([name, value]) => ({
+      name,
+      value: Number(value),
+    }));
+    return {
+      totalMailboxes: data.totalMailboxes || 0,
+      commercialCount: data.totalCommercial || 0,
+      residentialCount: data.totalResidential || 0,
+      avgPrice: data.avgPrice || 0,
+      byState,
+      bySource,
+      lastUpdated: data.lastUpdated,
     };
   },
 
@@ -102,7 +132,13 @@ export const api = {
       errorsSample: run.errorsSample || [],
     }));
   },
-  
+
+  cancelCrawlRun: async (runId: string): Promise<void> => {
+    await request(`/api/crawl/runs/${encodeURIComponent(runId)}/cancel`, {
+      method: 'POST',
+    });
+  },
+
   exportCSV: async () => {
     const url = `${API_BASE}/api/mailboxes/export`;
     window.open(url, '_blank');

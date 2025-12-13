@@ -19,6 +19,7 @@ type StandardizedAddress struct {
 // Mailbox is the core document stored in the `mailboxes` collection.
 type Mailbox struct {
 	ID                  string              `json:"id,omitempty" firestore:"id,omitempty"`
+	Source              string              `json:"source,omitempty" firestore:"source,omitempty"` // Data source: "ATMB" or "iPost1"
 	Name                string              `json:"name,omitempty" firestore:"name,omitempty"`
 	AddressRaw          AddressRaw          `json:"addressRaw,omitempty" firestore:"addressRaw,omitempty"`
 	Price               float64             `json:"price,omitempty" firestore:"price,omitempty"`
@@ -47,6 +48,7 @@ type CrawlRunStats struct {
 // CrawlRun tracks the lifecycle of a crawler execution.
 type CrawlRun struct {
 	RunID       string        `json:"runId,omitempty" firestore:"runId,omitempty"`
+	Source      string        `json:"source,omitempty" firestore:"source,omitempty"` // Data source: "ATMB" or "iPost1"
 	Status      string        `json:"status,omitempty" firestore:"status,omitempty"`
 	Stats       CrawlRunStats `json:"stats,omitempty" firestore:"stats,omitempty"`
 	StartedAt   time.Time     `json:"startedAt,omitempty" firestore:"startedAt,omitempty"`
@@ -68,4 +70,5 @@ type SystemStats struct {
 	TotalResidential int            `json:"totalResidential,omitempty" firestore:"totalResidential,omitempty"`
 	AvgPrice         float64        `json:"avgPrice,omitempty" firestore:"avgPrice,omitempty"`
 	ByState          map[string]int `json:"byState,omitempty" firestore:"byState,omitempty"`
+	BySource         map[string]int `json:"bySource,omitempty" firestore:"bySource,omitempty"`
 }

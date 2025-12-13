@@ -43,10 +43,15 @@ func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepo
 		api.GET("/mailboxes", r.listMailboxes)
 		api.GET("/mailboxes/export", r.exportMailboxes)
 		api.GET("/stats", r.getStats)
+		api.POST("/stats/refresh", r.refreshStats)
 		api.POST("/crawl/run", r.startCrawl)
 		api.POST("/crawl/reprocess", r.reprocessMailboxes)
 		api.GET("/crawl/status", r.getCrawlStatus)
 		api.GET("/crawl/runs", r.listCrawlRuns)
+		api.POST("/crawl/runs/:runId/cancel", r.cancelCrawlRun)
+
+		// iPost1 specific endpoints
+		api.POST("/crawl/ipost1/run", r.startIPost1Crawl)
 	}
 
 	return router
@@ -95,6 +100,7 @@ func (r *Router) listMailboxes(c *gin.Context) {
 		State:    c.Query("state"),
 		CMRA:     c.Query("cmra"),
 		RDI:      c.Query("rdi"),
+		Source:   c.Query("source"),
 		Active:   activePtr,
 		Page:     page,
 		PageSize: pageSize,
@@ -151,6 +157,34 @@ func (r *Router) getStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+func (r *Router) refreshStats(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	// Fetch all mailboxes
+	all, err := r.mailboxes.FetchAllMap(ctx)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to fetch mailboxes: " + err.Error()})
+		return
+	}
+
+	// Convert map to slice
+	var list []model.Mailbox
+	for _, m := range all {
+		list = append(list, m)
+	}
+
+	// Aggregate stats
+	sysStats := crawler.AggregateSystemStats(list)
+
+	// Save stats
+	if err := r.stats.SaveSystemStats(ctx, sysStats); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save stats: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, sysStats)
+}
+
 type startCrawlReq struct {
 	Links []string `json:"links"`
 }
@@ -192,6 +226,21 @@ func (r *Router) listCrawlRuns(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"items": runs})
 }
 
+func (r *Router) cancelCrawlRun(c *gin.Context) {
+	runID := c.Param("runId")
+	if runID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "runId is required"})
+		return
+	}
+
+	if err := r.runs.CancelRun(c.Request.Context(), runID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Run cancelled successfully", "runId": runID})
+}
+
 type reprocessReq struct {
 	TargetVersion   string `json:"targetVersion"`   // Optional: parser version to update to (defaults to current)
 	OnlyOutdated    bool   `json:"onlyOutdated"`    // Optional: only reprocess records with different parser version
@@ -220,5 +269,17 @@ func (r *Router) reprocessMailboxes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"runId":   runID,
 		"message": "Reprocessing started. Check status with GET /api/crawl/status?runId=" + runID,
+	})
+}
+
+func (r *Router) startIPost1Crawl(c *gin.Context) {
+	runID, err := r.crawler.StartIPost1Crawl(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"runId":   runID,
+		"message": "iPost1 crawl started. Check status with GET /api/crawl/status?runId=" + runID,
 	})
 }

@@ -17,13 +17,14 @@ export interface Mailbox {
   standardizedAddress?: StandardizedAddress;
   lastValidatedAt?: string;
   crawlRunId?: string;
+  source?: 'ATMB' | 'iPost1' | string;
 }
 
 export interface CrawlRun {
   id: string;
   startedAt: string;
   finishedAt?: string;
-  status: 'running' | 'success' | 'failed' | 'partial_halt';
+  status: 'running' | 'success' | 'failed' | 'partial_halt' | 'timeout' | 'cancelled';
   stats: {
     found: number;
     validated: number;
@@ -37,6 +38,7 @@ export interface MailboxFilter {
   state?: string;
   cmra?: 'Y' | 'N';
   rdi?: 'Residential' | 'Commercial';
+  source?: 'ATMB' | 'iPost1';
   search?: string;
   page: number;
   pageSize: number;
@@ -48,4 +50,6 @@ export interface Stats {
   residentialCount: number;
   avgPrice: number;
   byState: { name: string; value: number }[];
+  bySource: { name: string; value: number }[];
+  lastUpdated?: string;
 }
