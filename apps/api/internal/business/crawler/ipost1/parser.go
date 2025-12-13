@@ -3,7 +3,6 @@ package ipost1
 import (
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -136,15 +135,15 @@ func parsePrice(input string) float64 {
 	input = strings.Split(input, "/")[0] // Remove "/month" suffix
 	input = strings.TrimSpace(input)
 
-	// Extract first number
+	// Extract first number using fmt.Sscanf (avoids strconv import)
 	re := regexp.MustCompile(`[\d.]+`)
 	match := re.FindString(input)
 	if match == "" {
 		return 0.0
 	}
 
-	price, err := strconv.ParseFloat(match, 64)
-	if err != nil {
+	var price float64
+	if _, err := fmt.Sscanf(match, "%f", &price); err != nil {
 		return 0.0
 	}
 

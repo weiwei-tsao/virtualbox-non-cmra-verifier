@@ -31,6 +31,7 @@ const StatCard = ({ title, value, icon, color }: { title: string, value: string,
 const SOURCE_COLORS: Record<string, string> = {
   'ATMB': '#4F46E5',
   'iPost1': '#F59E0B',
+  'default': '#6B7280',
 };
 
 export const Analytics: React.FC = () => {
@@ -186,7 +187,7 @@ export const Analytics: React.FC = () => {
                     dataKey="value"
                   >
                     {stats.bySource.map((entry) => (
-                      <Cell key={`cell-${entry.name}`} fill={SOURCE_COLORS[entry.name] || '#6B7280'} />
+                      <Cell key={`cell-${entry.name}`} fill={SOURCE_COLORS[entry.name] || SOURCE_COLORS.default} />
                     ))}
                   </Pie>
                   <Tooltip />
