@@ -233,12 +233,20 @@ func (r *Router) cancelCrawlRun(c *gin.Context) {
 		return
 	}
 
+	// Cancel the running goroutine (if still running)
+	wasRunning := r.crawler.CancelJob(runID)
+
+	// Update database status
 	if err := r.runs.CancelRun(c.Request.Context(), runID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Run cancelled successfully", "runId": runID})
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "Run cancelled successfully",
+		"runId":      runID,
+		"wasRunning": wasRunning,
+	})
 }
 
 type reprocessReq struct {
