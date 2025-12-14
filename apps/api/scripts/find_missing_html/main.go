@@ -11,14 +11,6 @@ import (
 	"google.golang.org/api/iterator"
 )
 
-// Simple mailbox structure for querying
-type Mailbox struct {
-	ID      string `firestore:"id"`
-	Name    string `firestore:"name"`
-	Link    string `firestore:"link"`
-	RawHTML string `firestore:"rawHTML"`
-}
-
 func main() {
 	// Get Firebase project ID from environment
 	projectID := os.Getenv("FIREBASE_PROJECT_ID")

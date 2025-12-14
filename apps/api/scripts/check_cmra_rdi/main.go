@@ -9,16 +9,9 @@ import (
 
 	"cloud.google.com/go/firestore"
 	"google.golang.org/api/iterator"
-)
 
-// Simple mailbox structure for querying
-type Mailbox struct {
-	ID   string `firestore:"id"`
-	Name string `firestore:"name"`
-	Link string `firestore:"link"`
-	CMRA string `firestore:"cmra"`
-	RDI  string `firestore:"rdi"`
-}
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
+)
 
 func main() {
 	// Get Firebase project ID from environment
@@ -45,12 +38,12 @@ func main() {
 		RDICommercial   int
 		RDIResidential  int
 		RDIEmpty        int
-		SampleRecords   []Mailbox
+		SampleRecords   []model.Mailbox
 	}{
-		SampleRecords: make([]Mailbox, 0, 5),
+		SampleRecords: make([]model.Mailbox, 0, 5),
 	}
 
-	fmt.Println("Analyzing CMRA and RDI distribution...\n")
+	fmt.Println("Analyzing CMRA and RDI distribution...")
 
 	for {
 		doc, err := iter.Next()
@@ -61,7 +54,7 @@ func main() {
 			log.Fatalf("Iterator error: %v", err)
 		}
 
-		var mb Mailbox
+		var mb model.Mailbox
 		if err := doc.DataTo(&mb); err != nil {
 			log.Printf("Error decoding mailbox %s: %v", doc.Ref.ID, err)
 			continue
@@ -123,7 +116,7 @@ func main() {
 	// Print analysis
 	fmt.Printf("\n=== Analysis ===\n\n")
 	if stats.RDIResidential == 0 && stats.CMRAYes > 0 {
-		fmt.Println("✅ Finding: All addresses are Commercial")
+		fmt.Println("Finding: All addresses are Commercial")
 		fmt.Println("   Reason: AnytimeMailbox addresses are CMRA services")
 		fmt.Println("   CMRA (Commercial Mail Receiving Agency) = always Commercial RDI")
 		fmt.Println("\n   This is expected behavior - virtual mailbox services are")
@@ -131,7 +124,7 @@ func main() {
 	}
 
 	if stats.CMRAEmpty > 0 || stats.RDIEmpty > 0 {
-		fmt.Printf("\n⚠️  Warning: Found %d records with missing CMRA and/or %d with missing RDI\n",
+		fmt.Printf("\nWarning: Found %d records with missing CMRA and/or %d with missing RDI\n",
 			stats.CMRAEmpty, stats.RDIEmpty)
 		fmt.Println("   These records may not have been validated by Smarty API yet.")
 		fmt.Println("   Run a reprocess to update them.")

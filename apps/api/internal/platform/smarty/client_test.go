@@ -43,7 +43,7 @@ func TestClientCircuitBreaker(t *testing.T) {
 			Body:       io.NopCloser(bytes.NewBufferString("429")),
 		}, nil
 	})
-	c := New(rt, Config{Mock: false, AuthID: "id", AuthToken: "token", BreakerMax: 2, MaxRetries: 1})
+	c := New(rt, Config{Mock: false, AuthIDs: []string{"id"}, AuthTokens: []string{"token"}, BreakerMax: 2, MaxRetries: 1})
 
 	_, err := c.ValidateMailbox(context.Background(), model.Mailbox{
 		AddressRaw: model.AddressRaw{Street: "1", City: "2", State: "3", Zip: "4"},
@@ -51,13 +51,14 @@ func TestClientCircuitBreaker(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error on 429")
 	}
-	if err != ErrCircuitOpen {
-		// First 429 increments counter; second call should hit breaker.
+	if err != ErrAllCredentialsExhausted {
+		// First call exhausts the single credential's breaker after 2 retries.
+		// Since there's only one credential and it's exhausted, we get ErrAllCredentialsExhausted.
 		_, err = c.ValidateMailbox(context.Background(), model.Mailbox{
 			AddressRaw: model.AddressRaw{Street: "1", City: "2", State: "3", Zip: "4"},
 		})
-		if err != ErrCircuitOpen {
-			t.Fatalf("expected circuit open, got %v", err)
+		if err != ErrAllCredentialsExhausted {
+			t.Fatalf("expected all credentials exhausted, got %v", err)
 		}
 	}
 }
@@ -70,7 +71,7 @@ func TestClientSuccess(t *testing.T) {
 			Body:       io.NopCloser(bytes.NewBufferString(body)),
 		}, nil
 	})
-	c := New(rt, Config{Mock: false, AuthID: "id", AuthToken: "token"})
+	c := New(rt, Config{Mock: false, AuthIDs: []string{"id"}, AuthTokens: []string{"token"}})
 	got, err := c.ValidateMailbox(context.Background(), model.Mailbox{
 		AddressRaw: model.AddressRaw{Street: "123 Main", City: "Dover", State: "DE", Zip: "19901"},
 	})
