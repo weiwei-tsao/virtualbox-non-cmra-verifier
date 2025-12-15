@@ -15,27 +15,29 @@ import (
 
 // Service orchestrates end-to-end crawl.
 type Service struct {
-	fetcher   HTMLFetcher
-	validator ValidationClient
-	mailboxes *repository.MailboxRepository
-	runs      *repository.RunRepository
-	statsRepo *repository.StatsRepository
-	workerCnt int
-	seedLinks []string
+	fetcher    HTMLFetcher
+	validator  ValidationClient
+	mailboxes  *repository.MailboxRepository
+	runs       *repository.RunRepository
+	statsRepo  *repository.StatsRepository
+	workerCnt  int
+	seedLinks  []string
+	jobManager *JobManager
 }
 
-func NewService(fetcher HTMLFetcher, validator ValidationClient, mailboxes *repository.MailboxRepository, runs *repository.RunRepository, statsRepo *repository.StatsRepository, workerCnt int, seedLinks []string) *Service {
+func NewService(fetcher HTMLFetcher, validator ValidationClient, mailboxes *repository.MailboxRepository, runs *repository.RunRepository, statsRepo *repository.StatsRepository, workerCnt int, seedLinks []string, jobManager *JobManager) *Service {
 	if workerCnt <= 0 {
 		workerCnt = 5
 	}
 	return &Service{
-		fetcher:   fetcher,
-		validator: validator,
-		mailboxes: mailboxes,
-		runs:      runs,
-		statsRepo: statsRepo,
-		workerCnt: workerCnt,
-		seedLinks: seedLinks,
+		fetcher:    fetcher,
+		validator:  validator,
+		mailboxes:  mailboxes,
+		runs:       runs,
+		statsRepo:  statsRepo,
+		workerCnt:  workerCnt,
+		seedLinks:  seedLinks,
+		jobManager: jobManager,
 	}
 }
 
@@ -53,9 +55,16 @@ func (s *Service) Start(ctx context.Context, links []string) (string, error) {
 		return "", err
 	}
 	// Guard long-running crawls to avoid stuck runs.
-	runCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	runCtx, timeoutCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	runCtx, cancel := context.WithCancel(runCtx)
+
+	// Register for external cancellation
+	s.jobManager.Register(runID, cancel)
+
 	go func() {
+		defer s.jobManager.Unregister(runID)
 		defer cancel()
+		defer timeoutCancel()
 		s.execute(runCtx, runID, links, startTime)
 	}()
 	return runID, nil
@@ -71,7 +80,13 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 			status = "failed"
 			log.Printf("crawl panic run %s: %v", runID, rec)
 		}
-		if err := FinishRun(ctx, s.runs, runID, "ATMB", stats, status, startedAt); err != nil {
+		// Check if cancelled externally
+		if ctx.Err() == context.Canceled && status == "running" {
+			status = "cancelled"
+			log.Printf("crawl cancelled run %s", runID)
+		}
+		// Use background context for final update since runCtx may be cancelled
+		if err := FinishRun(context.Background(), s.runs, runID, "ATMB", stats, status, startedAt); err != nil {
 			log.Printf("finish run %s: %v", runID, err)
 		}
 	}()
@@ -163,9 +178,16 @@ func (s *Service) Reprocess(ctx context.Context, opts ReprocessOptions) (string,
 	}
 
 	// Run reprocessing asynchronously
-	runCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	runCtx, timeoutCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	runCtx, cancel := context.WithCancel(runCtx)
+
+	// Register for external cancellation
+	s.jobManager.Register(runID, cancel)
+
 	go func() {
+		defer s.jobManager.Unregister(runID)
 		defer cancel()
+		defer timeoutCancel()
 		s.executeReprocess(runCtx, runID, opts, startTime)
 	}()
 
@@ -182,7 +204,13 @@ func (s *Service) executeReprocess(ctx context.Context, runID string, opts Repro
 			status = "failed"
 			log.Printf("reprocess panic run %s: %v", runID, rec)
 		}
-		if err := FinishRun(ctx, s.runs, runID, "ATMB", stats, status, startedAt); err != nil {
+		// Check if cancelled externally
+		if ctx.Err() == context.Canceled && status == "running" {
+			status = "cancelled"
+			log.Printf("reprocess cancelled run %s", runID)
+		}
+		// Use background context for final update since runCtx may be cancelled
+		if err := FinishRun(context.Background(), s.runs, runID, "ATMB", stats, status, startedAt); err != nil {
 			log.Printf("finish run %s: %v", runID, err)
 		}
 	}()
@@ -243,9 +271,16 @@ func (s *Service) StartIPost1Crawl(ctx context.Context) (string, error) {
 	}
 
 	// Guard long-running crawls
-	runCtx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	runCtx, timeoutCancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	runCtx, cancel := context.WithCancel(runCtx)
+
+	// Register for external cancellation
+	s.jobManager.Register(runID, cancel)
+
 	go func() {
+		defer s.jobManager.Unregister(runID)
 		defer cancel()
+		defer timeoutCancel()
 		s.executeIPost1(runCtx, runID, startTime)
 	}()
 	return runID, nil
@@ -261,7 +296,13 @@ func (s *Service) executeIPost1(ctx context.Context, runID string, startedAt tim
 			status = "failed"
 			log.Printf("ipost1 crawl panic run %s: %v", runID, rec)
 		}
-		if err := FinishRun(ctx, s.runs, runID, "iPost1", stats, status, startedAt); err != nil {
+		// Check if cancelled externally
+		if ctx.Err() == context.Canceled && status == "running" {
+			status = "cancelled"
+			log.Printf("ipost1 crawl cancelled run %s", runID)
+		}
+		// Use background context for final update since runCtx may be cancelled
+		if err := FinishRun(context.Background(), s.runs, runID, "iPost1", stats, status, startedAt); err != nil {
 			log.Printf("finish run %s: %v", runID, err)
 		}
 	}()
@@ -371,4 +412,10 @@ func (s *Service) runIPost1ProcessAndValidate(ctx context.Context, runID string)
 		Skipped:   stats.Skipped,
 		Failed:    stats.Failed,
 	}, nil
+}
+
+// CancelJob cancels a running job by its ID.
+// Returns true if the job was found and cancelled, false if not running.
+func (s *Service) CancelJob(runID string) bool {
+	return s.jobManager.Cancel(runID)
 }

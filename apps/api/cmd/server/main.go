@@ -58,7 +58,9 @@ func main() {
 	} else {
 		log.Printf("Smarty client initialized with %d credential(s) for load balancing", len(cfg.SmartyAuthIDs))
 	}
-	crawlService := crawler.NewService(fetcher, validator, mailboxRepo, runRepo, statsRepo, 5, cfg.CrawlLinkSeeds)
+
+	jobManager := crawler.NewJobManager()
+	crawlService := crawler.NewService(fetcher, validator, mailboxRepo, runRepo, statsRepo, 5, cfg.CrawlLinkSeeds, jobManager)
 
 	router := apirouter.NewRouter(mailboxRepo, runRepo, statsRepo, crawlService, cfg.AllowedOrigins)
 
