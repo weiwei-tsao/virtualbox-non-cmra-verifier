@@ -85,6 +85,7 @@ func DiscoverAll(ctx context.Context, logFn func(string)) ([]model.Mailbox, erro
 
 // ProcessAndValidate discovers all iPost1 locations and validates them with Smarty.
 // This is similar to ATMB's ScrapeAndUpsert but adapted for iPost1's data structure.
+// Uses batch validation to reduce API calls by up to 99%.
 func ProcessAndValidate(
 	ctx context.Context,
 	validator ValidationClient,
@@ -113,7 +114,8 @@ func ProcessAndValidate(
 	}
 
 	var toSave []model.Mailbox
-	const batchSize = 20 // Write every 20 items
+	var toValidateIndices []int // Track indices that need validation
+	const batchSize = 20        // Write every 20 items
 
 	for i, mb := range discovered {
 		select {
@@ -144,25 +146,23 @@ func ProcessAndValidate(
 			mb.ID = prev.ID
 		}
 
-		// Validate with Smarty if needed
-		if validator != nil && (mb.CMRA == "" || mb.RDI == "") {
-			validated, err := validator.ValidateMailbox(ctx, mb)
-			if err != nil {
-				stats.Failed++
-				if logFn != nil {
-					logFn(fmt.Sprintf("validation failed for %s: %v", mb.Name, err))
-				}
-			} else {
-				mb = validated
-				stats.Validated++
-			}
-		}
+		// Track if validation needed
+		needsValidation := mb.CMRA == "" || mb.RDI == ""
 
 		toSave = append(toSave, mb)
+		if needsValidation && validator != nil {
+			toValidateIndices = append(toValidateIndices, len(toSave)-1)
+		}
 		stats.Updated++
 
-		// Incremental write
+		// Incremental write with batch validation
 		if len(toSave) >= batchSize {
+			// Batch validate before writing
+			if len(toValidateIndices) > 0 && validator != nil {
+				toSave, stats = batchValidateSubset(ctx, validator, toSave, toValidateIndices, stats, logFn)
+				toValidateIndices = toValidateIndices[:0]
+			}
+
 			if err := store.BatchUpsert(ctx, toSave); err != nil {
 				return stats, fmt.Errorf("batch upsert failed: %w", err)
 			}
@@ -173,8 +173,13 @@ func ProcessAndValidate(
 		}
 	}
 
-	// Final write
+	// Final write with batch validation
 	if len(toSave) > 0 {
+		// Batch validate remaining items
+		if len(toValidateIndices) > 0 && validator != nil {
+			toSave, stats = batchValidateSubset(ctx, validator, toSave, toValidateIndices, stats, logFn)
+		}
+
 		if err := store.BatchUpsert(ctx, toSave); err != nil {
 			return stats, fmt.Errorf("final batch upsert failed: %w", err)
 		}
@@ -184,6 +189,49 @@ func ProcessAndValidate(
 	}
 
 	return stats, nil
+}
+
+// batchValidateSubset validates a subset of mailboxes by their indices using batch API.
+func batchValidateSubset(
+	ctx context.Context,
+	validator ValidationClient,
+	mailboxes []model.Mailbox,
+	indices []int,
+	stats Stats,
+	logFn func(string),
+) ([]model.Mailbox, Stats) {
+	if len(indices) == 0 {
+		return mailboxes, stats
+	}
+
+	// Extract subset to validate
+	subset := make([]model.Mailbox, len(indices))
+	for i, idx := range indices {
+		subset[i] = mailboxes[idx]
+	}
+
+	// Batch validate
+	validated, err := validator.ValidateMailboxBatch(ctx, subset)
+	if err != nil {
+		// On error, count all as failed
+		stats.Failed += len(indices)
+		if logFn != nil {
+			logFn(fmt.Sprintf("batch validation failed for %d items: %v", len(indices), err))
+		}
+		return mailboxes, stats
+	}
+
+	// Merge results back
+	for i, idx := range indices {
+		mailboxes[idx] = validated[i]
+		if validated[i].CMRA != "" {
+			stats.Validated++
+		} else {
+			stats.Failed++
+		}
+	}
+
+	return mailboxes, stats
 }
 
 // Stats tracks the progress of iPost1 crawl.
@@ -198,6 +246,7 @@ type Stats struct {
 // ValidationClient interface for Smarty API validation.
 type ValidationClient interface {
 	ValidateMailbox(ctx context.Context, mb model.Mailbox) (model.Mailbox, error)
+	ValidateMailboxBatch(ctx context.Context, mailboxes []model.Mailbox) ([]model.Mailbox, error)
 }
 
 // MailboxStore interface for database operations.

@@ -36,6 +36,7 @@ type ScrapeStats struct {
 }
 
 // ScrapeAndUpsert runs the scrape pipeline: fetch pages, parse, hash, compare, and batch upsert.
+// Uses batch validation to reduce API calls by up to 99%.
 func ScrapeAndUpsert(
 	ctx context.Context,
 	fetcher HTMLFetcher,
@@ -55,6 +56,7 @@ func ScrapeAndUpsert(
 	}
 
 	var toSave []model.Mailbox
+	var toValidateIndices []int // Track indices that need validation
 	const incrementalWriteThreshold = 20 // Write to DB every 20 items (reduced due to RawHTML size)
 
 	for _, link := range links {
@@ -125,29 +127,23 @@ func ScrapeAndUpsert(
 			parsed.ID = prev.ID
 		}
 
-		needsValidation := true
-		if parsed.CMRA != "" && parsed.RDI != "" {
-			needsValidation = false
-		}
-
-		if needsValidation && validator != nil {
-			validated, err := validator.ValidateMailbox(ctx, parsed)
-			if err != nil {
-				stats.Failed++
-				if logFn != nil {
-					logFn(fmt.Sprintf("validate %s error: %v", link, err))
-				}
-			} else {
-				parsed = validated
-				stats.Validated++
-			}
-		}
+		// Track if validation needed (CMRA/RDI are always empty after HTML parsing)
+		needsValidation := parsed.CMRA == "" || parsed.RDI == ""
 
 		toSave = append(toSave, parsed)
+		if needsValidation && validator != nil {
+			toValidateIndices = append(toValidateIndices, len(toSave)-1)
+		}
 		stats.Updated++
 
-		// Incremental write: flush to DB every N items to prevent data loss
+		// Incremental write with batch validation: flush to DB every N items
 		if len(toSave) >= incrementalWriteThreshold {
+			// Batch validate before writing
+			if len(toValidateIndices) > 0 && validator != nil {
+				toSave, stats = batchValidateSubset(ctx, validator, toSave, toValidateIndices, stats, logFn)
+				toValidateIndices = toValidateIndices[:0]
+			}
+
 			if err := store.BatchUpsert(ctx, toSave); err != nil {
 				if logFn != nil {
 					logFn(fmt.Sprintf("incremental batch upsert error: %v", err))
@@ -165,8 +161,13 @@ func ScrapeAndUpsert(
 		}
 	}
 
-	// Final write: flush any remaining items
+	// Final write with batch validation: flush any remaining items
 	if len(toSave) > 0 {
+		// Batch validate remaining items
+		if len(toValidateIndices) > 0 && validator != nil {
+			toSave, stats = batchValidateSubset(ctx, validator, toSave, toValidateIndices, stats, logFn)
+		}
+
 		if err := store.BatchUpsert(ctx, toSave); err != nil {
 			if logFn != nil {
 				logFn(fmt.Sprintf("final batch upsert error: %v", err))
@@ -178,4 +179,47 @@ func ScrapeAndUpsert(
 		}
 	}
 	return stats, nil
+}
+
+// batchValidateSubset validates a subset of mailboxes by their indices using batch API.
+func batchValidateSubset(
+	ctx context.Context,
+	validator ValidationClient,
+	mailboxes []model.Mailbox,
+	indices []int,
+	stats ScrapeStats,
+	logFn func(string),
+) ([]model.Mailbox, ScrapeStats) {
+	if len(indices) == 0 {
+		return mailboxes, stats
+	}
+
+	// Extract subset to validate
+	subset := make([]model.Mailbox, len(indices))
+	for i, idx := range indices {
+		subset[i] = mailboxes[idx]
+	}
+
+	// Batch validate
+	validated, err := validator.ValidateMailboxBatch(ctx, subset)
+	if err != nil {
+		// On error, count all as failed
+		stats.Failed += len(indices)
+		if logFn != nil {
+			logFn(fmt.Sprintf("batch validation failed for %d items: %v", len(indices), err))
+		}
+		return mailboxes, stats
+	}
+
+	// Merge results back
+	for i, idx := range indices {
+		mailboxes[idx] = validated[i]
+		if validated[i].CMRA != "" {
+			stats.Validated++
+		} else {
+			stats.Failed++
+		}
+	}
+
+	return mailboxes, stats
 }

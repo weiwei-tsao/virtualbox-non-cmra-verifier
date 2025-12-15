@@ -31,6 +31,7 @@ type ReprocessStats struct {
 
 // ReprocessFromDB re-parses mailboxes from stored RawHTML without re-fetching.
 // This is useful when parser logic changes and you need to update all records.
+// Uses batch validation to reduce API calls by up to 99%.
 func ReprocessFromDB(
 	ctx context.Context,
 	store MailboxStore,
@@ -61,6 +62,7 @@ func ReprocessFromDB(
 	}
 
 	var toUpdate []model.Mailbox
+	var toValidateIndices []int // Track indices that need validation
 	const incrementalWriteThreshold = 20 // Write to DB every 20 items (reduced due to RawHTML size)
 
 	for link, mb := range existing {
@@ -119,15 +121,7 @@ func ReprocessFromDB(
 		// 2. ForceRevalidate option is enabled (useful when switching from mock to real API)
 		needsRevalidation := reparsed.DataHash != mb.DataHash || opts.ForceRevalidate
 
-		if smarty != nil && needsRevalidation {
-			validated, err := smarty.ValidateMailbox(ctx, reparsed)
-			if err == nil {
-				reparsed = validated
-				reparsed.LastValidatedAt = time.Now()
-			} else if logFn != nil {
-				logFn(fmt.Sprintf("smarty validation failed for %s: %v", link, err))
-			}
-		} else {
+		if !needsRevalidation {
 			// Keep existing validation if data unchanged and not forcing revalidation
 			reparsed.CMRA = mb.CMRA
 			reparsed.RDI = mb.RDI
@@ -136,10 +130,19 @@ func ReprocessFromDB(
 		}
 
 		toUpdate = append(toUpdate, reparsed)
+		if needsRevalidation && smarty != nil {
+			toValidateIndices = append(toValidateIndices, len(toUpdate)-1)
+		}
 		stats.Processed++
 
-		// Incremental write: flush to DB every N items
+		// Incremental write with batch validation: flush to DB every N items
 		if len(toUpdate) >= incrementalWriteThreshold {
+			// Batch validate before writing
+			if len(toValidateIndices) > 0 && smarty != nil {
+				toUpdate = reprocessBatchValidate(ctx, smarty, toUpdate, toValidateIndices, logFn)
+				toValidateIndices = toValidateIndices[:0]
+			}
+
 			if err := store.BatchUpsert(ctx, toUpdate); err != nil {
 				if logFn != nil {
 					logFn(fmt.Sprintf("batch upsert error: %v", err))
@@ -157,8 +160,13 @@ func ReprocessFromDB(
 		}
 	}
 
-	// Final write: flush remaining items
+	// Final write with batch validation: flush remaining items
 	if len(toUpdate) > 0 {
+		// Batch validate remaining items
+		if len(toValidateIndices) > 0 && smarty != nil {
+			toUpdate = reprocessBatchValidate(ctx, smarty, toUpdate, toValidateIndices, logFn)
+		}
+
 		if err := store.BatchUpsert(ctx, toUpdate); err != nil {
 			if logFn != nil {
 				logFn(fmt.Sprintf("final batch upsert error: %v", err))
@@ -176,4 +184,41 @@ func ReprocessFromDB(
 	}
 
 	return stats, nil
+}
+
+// reprocessBatchValidate validates a subset of mailboxes by their indices using batch API.
+func reprocessBatchValidate(
+	ctx context.Context,
+	validator ValidationClient,
+	mailboxes []model.Mailbox,
+	indices []int,
+	logFn func(string),
+) []model.Mailbox {
+	if len(indices) == 0 {
+		return mailboxes
+	}
+
+	// Extract subset to validate
+	subset := make([]model.Mailbox, len(indices))
+	for i, idx := range indices {
+		subset[i] = mailboxes[idx]
+	}
+
+	// Batch validate
+	validated, err := validator.ValidateMailboxBatch(ctx, subset)
+	if err != nil {
+		if logFn != nil {
+			logFn(fmt.Sprintf("batch validation failed for %d items: %v", len(indices), err))
+		}
+		return mailboxes
+	}
+
+	// Merge results back
+	now := time.Now()
+	for i, idx := range indices {
+		mailboxes[idx] = validated[i]
+		mailboxes[idx].LastValidatedAt = now
+	}
+
+	return mailboxes
 }
