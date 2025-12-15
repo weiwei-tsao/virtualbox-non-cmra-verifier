@@ -250,19 +250,24 @@ func decodeSmartyResponse(mailbox model.Mailbox, body io.Reader) (model.Mailbox,
 		DeliveryLine1: first.DeliveryLine1,
 		LastLine:      first.LastLine,
 	}
-	mailbox.CMRA = first.Analysis.CMRA
-	mailbox.RDI = first.Analysis.RDI
+	// CMRA is in analysis.dpv_cmra, RDI is in metadata.rdi
+	mailbox.CMRA = first.Analysis.DPVCMRA
+	mailbox.RDI = first.Metadata.RDI
 	mailbox.LastValidatedAt = time.Now().UTC()
 	return mailbox, nil
 }
 
 type smartyCandidate struct {
-	DeliveryLine1 string         `json:"delivery_line_1"`
-	LastLine      string         `json:"last_line"`
-	Analysis      smartyAnalysis `json:"analysis"`
+	DeliveryLine1 string          `json:"delivery_line_1"`
+	LastLine      string          `json:"last_line"`
+	Metadata      smartyMetadata  `json:"metadata"`
+	Analysis      smartyAnalysis  `json:"analysis"`
+}
+
+type smartyMetadata struct {
+	RDI string `json:"rdi"` // "Commercial" or "Residential"
 }
 
 type smartyAnalysis struct {
-	CMRA string `json:"cmra"`
-	RDI  string `json:"rdi"`
+	DPVCMRA string `json:"dpv_cmra"` // "Y" or "N"
 }

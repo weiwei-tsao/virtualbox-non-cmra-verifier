@@ -64,7 +64,8 @@ func TestClientCircuitBreaker(t *testing.T) {
 }
 
 func TestClientSuccess(t *testing.T) {
-	body := `[{"delivery_line_1":"123 Main","last_line":"Dover, DE 19901","analysis":{"cmra":"Y","rdi":"Commercial"}}]`
+	// Match actual Smarty API response structure: dpv_cmra in analysis, rdi in metadata
+	body := `[{"delivery_line_1":"123 Main","last_line":"Dover, DE 19901","metadata":{"rdi":"Commercial"},"analysis":{"dpv_cmra":"Y"}}]`
 	rt := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
