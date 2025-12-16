@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { MailboxFilter } from '../types';
 import { api } from '../services/api';
 import { Download, Search, Building2, Home, CheckCircle2 } from 'lucide-react';
-import { US_STATES, SOURCE_OPTIONS, RDI_OPTIONS } from '../constants';
+import { US_STATES, SOURCE_OPTIONS, RDI_OPTIONS, CMRA_OPTIONS } from '../constants';
 
 export const Mailboxes: React.FC = () => {
   const [filter, setFilter] = useState<MailboxFilter>({
@@ -111,6 +111,17 @@ export const Mailboxes: React.FC = () => {
             <option value="">All Types</option>
             {RDI_OPTIONS.map((r) => (
               <option key={r} value={r}>{r}</option>
+            ))}
+          </select>
+
+          <select
+            className="block pl-3 pr-10 py-2 text-base border-gray-300 focus:outline-none focus:ring-primary focus:border-primary sm:text-sm rounded-md"
+            value={filter.cmra || ''}
+            onChange={(e) => setFilter({ ...filter, cmra: e.target.value as any, page: 1 })}
+          >
+            <option value="">All CMRA</option>
+            {CMRA_OPTIONS.map((c) => (
+              <option key={c.value} value={c.value}>{c.label}</option>
             ))}
           </select>
         </div>

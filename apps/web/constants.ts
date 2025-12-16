@@ -65,6 +65,12 @@ export const SOURCE_OPTIONS = ['ATMB', 'iPost1'] as const;
 // RDI (Residential Delivery Indicator) options
 export const RDI_OPTIONS = ['Residential', 'Commercial'] as const;
 
+// CMRA (Commercial Mail Receiving Agency) options
+export const CMRA_OPTIONS = [
+  { value: 'Y', label: 'CMRA' },
+  { value: 'N', label: 'Not CMRA' },
+] as const;
+
 // Type exports for convenience
 export type StateCode = (typeof US_STATES)[number]['code'];
 export type SourceType = (typeof SOURCE_OPTIONS)[number];
