@@ -24,7 +24,7 @@ export const Mailboxes: React.FC = () => {
   const total = queryData?.total ?? 0;
 
   const handleExport = () => {
-    api.exportCSV();
+    api.exportCSV(filter);
     alert("Export started! Check your downloads.");
   };
 

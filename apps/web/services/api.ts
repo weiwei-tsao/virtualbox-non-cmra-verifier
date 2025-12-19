@@ -139,8 +139,15 @@ export const api = {
     });
   },
 
-  exportCSV: async () => {
-    const url = `${API_BASE}/api/mailboxes/export`;
+  exportCSV: async (filter?: MailboxFilter) => {
+    const qs = filter ? toQueryString({
+      state: filter.state,
+      cmra: filter.cmra,
+      rdi: filter.rdi,
+      source: filter.source,
+      active: 'true',
+    }) : 'active=true';
+    const url = `${API_BASE}/api/mailboxes/export${qs ? `?${qs}` : ''}`;
     window.open(url, '_blank');
     return true;
   }

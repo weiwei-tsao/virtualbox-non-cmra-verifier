@@ -207,6 +207,47 @@ func (r *MailboxRepository) StreamAll(ctx context.Context, activeOnly bool, fn f
 	}
 }
 
+// StreamWithQuery streams mailboxes with filters to a callback without loading all into memory.
+func (r *MailboxRepository) StreamWithQuery(ctx context.Context, q MailboxQuery, fn func(model.Mailbox) error) error {
+	query := r.client.Collection("mailboxes").Query
+	if q.State != "" {
+		query = query.Where("addressRaw.state", "==", q.State)
+	}
+	if q.CMRA != "" {
+		query = query.Where("cmra", "==", q.CMRA)
+	}
+	if q.RDI != "" {
+		query = query.Where("rdi", "==", q.RDI)
+	}
+	if q.Source != "" {
+		query = query.Where("source", "==", q.Source)
+	}
+	if q.Active != nil {
+		query = query.Where("active", "==", *q.Active)
+	}
+
+	iter := query.Documents(ctx)
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("iterate mailboxes: %w", err)
+		}
+		var m model.Mailbox
+		if err := doc.DataTo(&m); err != nil {
+			return fmt.Errorf("decode mailbox %s: %w", doc.Ref.ID, err)
+		}
+		if m.ID == "" {
+			m.ID = doc.Ref.ID
+		}
+		if err := fn(m); err != nil {
+			return err
+		}
+	}
+}
+
 func documentID(m model.Mailbox) string {
 	if m.ID != "" {
 		return m.ID

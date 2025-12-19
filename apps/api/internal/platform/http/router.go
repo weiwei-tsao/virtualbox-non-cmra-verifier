@@ -120,15 +120,30 @@ func (r *Router) exportMailboxes(c *gin.Context) {
 	c.Header("Content-Type", "text/csv")
 	c.Header("Content-Disposition", "attachment; filename=mailboxes.csv")
 
+	// Parse query parameters for filtering
+	activePtr := func() *bool { v := true; return &v }() // default to active only
+	if activeParam := c.Query("active"); activeParam != "" {
+		val := activeParam == "true"
+		activePtr = &val
+	}
+
+	query := repository.MailboxQuery{
+		State:  c.Query("state"),
+		CMRA:   c.Query("cmra"),
+		RDI:    c.Query("rdi"),
+		Source: c.Query("source"),
+		Active: activePtr,
+	}
+
 	writer := csv.NewWriter(c.Writer)
 	defer writer.Flush()
 
-	if err := writer.Write([]string{"name", "street", "city", "state", "zip", "price", "link", "cmra", "rdi"}); err != nil {
+	if err := writer.Write([]string{"name", "street", "city", "state", "zip", "price", "link", "cmra", "rdi", "source"}); err != nil {
 		c.Status(http.StatusInternalServerError)
 		return
 	}
 
-	err := r.mailboxes.StreamAll(c.Request.Context(), true, func(mb model.Mailbox) error {
+	err := r.mailboxes.StreamWithQuery(c.Request.Context(), query, func(mb model.Mailbox) error {
 		row := []string{
 			mb.Name,
 			mb.AddressRaw.Street,
@@ -139,6 +154,7 @@ func (r *Router) exportMailboxes(c *gin.Context) {
 			mb.Link,
 			mb.CMRA,
 			mb.RDI,
+			mb.Source,
 		}
 		return writer.Write(row)
 	})
