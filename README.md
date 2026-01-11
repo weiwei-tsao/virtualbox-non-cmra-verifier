@@ -1,167 +1,206 @@
-# Project Evaluation & Backend System Design
+# Virtual Box Verifier
 
-## 1. Architecture Evaluation
+> US Virtual Mailbox Address Aggregator & Validator
 
-The proposed **React (Frontend) + Go (Backend) + Firestore (DB)** architecture is **highly recommended** for this specific use case for the following reasons:
+[English](#english) | [中文](#中文)
 
-- **Concurrency**: Go is ideal for writing high-concurrency scrapers (using Goroutines) to handle 50+ states and thousands of mailbox pages efficiently without blocking.
-- **Flexible Schema**: Firestore (NoSQL) is perfect for address data where fields might vary slightly between scrapers or standardized results.
-- **Free Tier Feasibility**:
-  - **Vercel** hosts the React app for free.
-  - **Render** offers free Go instances (note: they spin down after inactivity, which is fine for a dashboard, but you might need a "keep-alive" or use a Cron job trigger).
-  - **Firebase** offers a generous free tier (50k reads/day) which fits the volume of ATMB data (approx 2k-3k locations).
+---
 
-## 2. Backend Design Recommendations
+## English
 
-### Folder Structure (Refined)
+### Overview
 
-To keep the single binary deployment on Render simple yet professional:
+A full-stack application that scrapes, validates, and manages US virtual mailbox addresses from multiple providers. The system validates addresses via the Smarty API to classify them as CMRA (Commercial Mail Receiving Agency) and RDI (Residential Delivery Indicator).
 
-```
-backend/
-├── cmd/
-│   └── server/
-│       └── main.go         # Entry point: Starts HTTP server & loads config
-├── internal/
-│   ├── api/
-│   │   └── handlers.go     # Gin/Fiber handlers for /api/mailboxes
-│   ├── scraper/
-│   │   ├── collector.go    # Colly or Goquery logic for ATMB
-│   │   └── worker.go       # Worker pool to manage concurrency
-│   ├── smarty/
-│   │   └── client.go       # Smarty API wrapper with rate limiting
-│   └── repository/
-│       └── firestore.go    # DB interactions
-└── pkg/
-    └── models/             # Shared structs (Mailbox, RunStatus)
-```
+### Features
 
-### Critical Implementation Details
+- **Multi-Source Scraping**: ATMB (~2,000 locations) and iPost1 (~4,000 locations)
+- **Address Validation**: Smarty API integration with batch processing (100 addresses/request)
+- **Dashboard**: Filter, search, and export mailbox data
+- **Analytics**: Charts showing RDI distribution, state breakdown, and source distribution
+- **Reprocessing**: Re-parse stored HTML without re-fetching (15x faster iteration)
 
-1.  **Rate Limiting & Rotation**:
+### Tech Stack
 
-    - When implementing the `scraper`, ensure you add random delays (2-5s) between requests to avoid IP bans from ATMB.
-    - For Smarty, implement a `TokenBucket` in Go to respect your plan's QPS limits.
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 19 + TypeScript + Vite + TanStack Query |
+| Backend | Go 1.25 + Gin Framework |
+| Database | Firebase Firestore |
+| Validation | Smarty Street API |
+| Automation | chromedp (Cloudflare bypass) |
 
-2.  **State Management**:
+### Quick Start
 
-    - Since Render free instances might restart, do not store "Crawl State" in memory variables.
-    - Update the `crawl_runs` Firestore document frequently (e.g., every 50 items processed) so if the server restarts, it knows where it left off (or at least reports failure correctly).
-
-3.  **Address Normalization**:
-
-    - Store the _raw_ address scraped from ATMB separately from the _standardized_ address returned by Smarty. This allows you to re-validate later without re-scraping if validation logic changes.
-
-4.  **Deployment**:
-    - **Dockerfile**: Create a multi-stage Dockerfile to compile the Go binary into a scratch/alpine image (very small, <20MB) for faster Render deployments.
-
-## 3. Frontend Features (Implemented)
-
-The generated React code includes:
-
-- **Dashboard**: Filtering by State, CMRA, and RDI status.
-- **Analytics**: Visual breakdown of Residential vs Commercial addresses using Recharts.
-- **Crawler Control**: UI to trigger the backend job and view history.
-- **Mock Service**: A simulation layer so you can run this UI immediately to verify the UX before connecting the real Go backend.
-
-## 4. Backend quick start (local)
-
-Minimal steps to run the Go server with Firestore:
+#### Backend
 
 ```bash
 cd apps/api
+
+# Create environment file
 cat > .env.local <<'EOF'
-# Server Configuration
 PORT=8080
-
-# 本地开发用 debug (日志全), 线上部署改为 release (性能高)
 GIN_MODE=debug
+ALLOWED_ORIGINS=http://localhost:5173
 
-# CORS 设置，本地开发通常允许前端 http://localhost:5173
-ALLOWED_ORIGINS=http://localhost:5173,https://your-vercel-app.vercel.app
-
-# Firebase / Firestore Configuration
+# Firebase
 FIREBASE_PROJECT_ID=your-project-id
-# [线上/Render] 必须：将 service-account.json 内容转为 Base64 填入此处
-# FIREBASE_CREDS_BASE64=
-# [本地开发] 可选：虽然代码会优先找根目录的 service-account.json 文件，
-# 但显式指定路径有时能避免路径错误问题 (需代码支持，若代码硬编码了文件名则忽略此行)
 FIREBASE_CREDS_FILE=service-account.json
 
-# Smarty Address Verification
+# Smarty (set SMARTY_MOCK=true to skip real API calls)
 SMARTY_AUTH_ID=your-smarty-id
 SMARTY_AUTH_TOKEN=your-smarty-token
-# [省钱开关] true: 不会真的调用 Smarty API，返回模拟数据; false: 真实计费调用
 SMARTY_MOCK=true
 
-# Crawler Tuning (Render Free Tier Safety)
-# [关键] 爬虫并发 Worker 数量。
-# 本地可开 10-20，Render 免费版建议设置为 5 以防内存溢出 (OOM)
+# Crawler
 CRAWLER_CONCURRENCY=5
-# Smarty 调用重试次数
-SMARTY_MAX_RETRIES=3
-# 可选：默认的详情页链接列表（逗号分隔），若启动任务未传 links 时使用
-CRAWL_LINK_SEEDS=https://anytimemailbox.com/locations/abc-store
 EOF
 
+# Run server
 env $(cat .env.local | xargs) go run ./cmd/server
 ```
 
-Notes:
+#### Frontend
 
-- The backend expects either `FIREBASE_CREDS_BASE64` or `FIREBASE_CREDS_FILE` to be set (one is required).
-- Keep `SMARTY_MOCK=true` if you do not want live Smarty calls during local development.
-- Health check is available at `http://localhost:8080/healthz`.
+```bash
+cd apps/web
+npm install
+npm run dev
+```
 
-## 5. Backend API (current)
+### API Endpoints
 
-- `GET /api/mailboxes` — list with pagination/filter (`state`, `cmra`, `rdi`, `active`, `page`, `pageSize`).
-- `GET /api/mailboxes/export` — CSV streaming (active only).
-- `GET /api/stats` — returns precomputed `system/stats`.
-- `POST /api/crawl/run` — start crawl; body `{ "links": ["https://anytimemailbox.com/locations/..."] }`.
-- `GET /api/crawl/status?runId=...` — fetch crawl run status.
-- `GET /healthz` — liveness probe.
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/healthz` | Health check |
+| GET | `/api/mailboxes` | List with filters & pagination |
+| GET | `/api/mailboxes/export` | CSV export |
+| GET | `/api/stats` | Dashboard metrics |
+| POST | `/api/crawl/run` | Start ATMB crawl |
+| POST | `/api/crawl/ipost1/run` | Start iPost1 crawl |
+| POST | `/api/crawl/reprocess` | Re-parse from stored HTML |
+| GET | `/api/crawl/status?runId=X` | Job status |
+| GET | `/api/crawl/runs` | Job history |
 
-## 6. iPost1 Integration (NEW)
+### Deployment
 
-**文档**: [快速开始](docs/ipost1_README.md) | [完整实现方案](docs/ipost1_final_implementation_plan.md)
+| Service | Platform | Notes |
+|---------|----------|-------|
+| Frontend | Vercel | Set `VITE_API_URL` |
+| Backend | Render | Set env vars, build: `go build -o server cmd/server/main.go` |
+| Database | Firebase | Free tier: 50K reads/day |
 
-iPost1 虚拟邮箱服务商，提供 ~4000 个美国地点。API 结构已验证，实现方案已完成。
+### Documentation
 
-### 状态
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical documentation.
 
-- ✅ API 结构已验证（JSON + HTML 混合）
-- ✅ 完整实现方案已就绪
-- ⏳ 待实现：Go 代码（预计 10-14 小时）
+---
 
-### 技术方案
+## 中文
 
-- **数据源**: `locations_ajax.php` API（返回 JSON 包裹 HTML）
-- **反爬虫**: chromedp 浏览器自动化
-- **解析**: goquery 提取 HTML 中的地址字段
-- **复用**: 完全使用现有 `Mailbox` 模型
+### 概述
+
+一个全栈应用，用于抓取、验证和管理美国虚拟邮箱地址。系统通过 Smarty API 验证地址，并将其分类为 CMRA（商业邮件接收机构）和 RDI（住宅配送指示器）。
+
+### 功能特性
+
+- **多源抓取**: ATMB (~2,000 个地点) 和 iPost1 (~4,000 个地点)
+- **地址验证**: Smarty API 集成，支持批量处理 (100 个地址/请求)
+- **管理面板**: 过滤、搜索和导出邮箱数据
+- **数据分析**: RDI 分布、州分布和数据源分布图表
+- **重处理**: 从存储的 HTML 重新解析，无需重新抓取 (迭代速度提升 15 倍)
+
+### 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 前端 | React 19 + TypeScript + Vite + TanStack Query |
+| 后端 | Go 1.25 + Gin 框架 |
+| 数据库 | Firebase Firestore |
+| 验证 | Smarty Street API |
+| 自动化 | chromedp (绕过 Cloudflare) |
 
 ### 快速开始
 
+#### 后端
+
 ```bash
-# 查看实现方案
-cat docs/ipost1_final_implementation_plan.md
+cd apps/api
 
-# 安装依赖
-go get github.com/chromedp/chromedp github.com/PuerkitoBio/goquery
+# 创建环境配置文件
+cat > .env.local <<'EOF'
+PORT=8080
+GIN_MODE=debug
+ALLOWED_ORIGINS=http://localhost:5173
 
-# 创建文件
-mkdir -p apps/api/internal/business/crawler/ipost1
+# Firebase 配置
+FIREBASE_PROJECT_ID=your-project-id
+FIREBASE_CREDS_FILE=service-account.json
 
-# 实现代码（参考文档中的完整示例）
-# - client.go
-# - parser.go
-# - discovery.go
+# Smarty 配置 (设置 SMARTY_MOCK=true 跳过真实 API 调用)
+SMARTY_AUTH_ID=your-smarty-id
+SMARTY_AUTH_TOKEN=your-smarty-token
+SMARTY_MOCK=true
+
+# 爬虫配置
+CRAWLER_CONCURRENCY=5
+EOF
+
+# 启动服务
+env $(cat .env.local | xargs) go run ./cmd/server
 ```
 
-## 7. Deployment notes (Render/Firebase/Vercel)
+#### 前端
 
-- Render build/start: `go build -o server cmd/server/main.go` then `./server`.
-- Ensure env vars on Render: `PORT`, `FIREBASE_PROJECT_ID`, `FIREBASE_CREDS_BASE64`, `SMARTY_AUTH_ID`, `SMARTY_AUTH_TOKEN`, `SMARTY_MOCK`, `ALLOWED_ORIGINS`.
-- Firestore indexes: see `apps/api/firestore.indexes.json` (active+state, active+rdi, crawlRunId).
-- Keep frontend dev origin in `ALLOWED_ORIGINS` to avoid CORS issues (e.g., `http://localhost:5173`).***
+```bash
+cd apps/web
+npm install
+npm run dev
+```
+
+### API 端点
+
+| 方法 | 端点 | 描述 |
+|------|------|------|
+| GET | `/healthz` | 健康检查 |
+| GET | `/api/mailboxes` | 列表查询（支持过滤和分页） |
+| GET | `/api/mailboxes/export` | CSV 导出 |
+| GET | `/api/stats` | 仪表盘统计 |
+| POST | `/api/crawl/run` | 启动 ATMB 爬虫 |
+| POST | `/api/crawl/ipost1/run` | 启动 iPost1 爬虫 |
+| POST | `/api/crawl/reprocess` | 从存储的 HTML 重新解析 |
+| GET | `/api/crawl/status?runId=X` | 任务状态 |
+| GET | `/api/crawl/runs` | 任务历史 |
+
+### 部署
+
+| 服务 | 平台 | 说明 |
+|------|------|------|
+| 前端 | Vercel | 设置 `VITE_API_URL` 环境变量 |
+| 后端 | Render | 设置环境变量，构建命令: `go build -o server cmd/server/main.go` |
+| 数据库 | Firebase | 免费额度: 50K 读取/天 |
+
+### 环境变量说明
+
+| 变量 | 说明 | 示例 |
+|------|------|------|
+| `PORT` | 服务端口 | `8080` |
+| `GIN_MODE` | Gin 模式 (debug/release) | `debug` |
+| `ALLOWED_ORIGINS` | CORS 允许的来源 | `http://localhost:5173` |
+| `FIREBASE_PROJECT_ID` | Firebase 项目 ID | `your-project-id` |
+| `FIREBASE_CREDS_FILE` | 本地凭证文件路径 | `service-account.json` |
+| `FIREBASE_CREDS_BASE64` | 线上凭证 (Base64 编码) | - |
+| `SMARTY_AUTH_ID` | Smarty 认证 ID (多个用逗号分隔) | `id1,id2` |
+| `SMARTY_AUTH_TOKEN` | Smarty 认证令牌 (多个用逗号分隔) | `token1,token2` |
+| `SMARTY_MOCK` | 是否使用模拟模式 | `true` |
+| `CRAWLER_CONCURRENCY` | 爬虫并发数 (Render 免费版建议 5) | `5` |
+
+### 文档
+
+详细技术文档请参阅 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+
+---
+
+## License
+
+MIT
