@@ -10,6 +10,7 @@ const queryClient = new QueryClient({
       gcTime: 60 * 60 * 1000,    // 1 hour - keep in cache even after unmount
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
+      retry: false, // Disable retries to prevent multiple failed requests when backend is down
     },
   },
 });
