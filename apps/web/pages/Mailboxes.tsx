@@ -5,6 +5,7 @@ import { api } from '../services/api';
 import { Download, Search, CheckCircle2 } from 'lucide-react';
 import { US_STATES, SOURCE_OPTIONS, RDI_OPTIONS, CMRA_OPTIONS } from '../constants';
 import { RDIBadge, CMRABadge, SourceBadge } from '../components/badges';
+import { useCSVExport } from '../hooks/useCSVExport';
 
 export const Mailboxes: React.FC = () => {
   const [filter, setFilter] = useState<MailboxFilter>({
@@ -13,6 +14,8 @@ export const Mailboxes: React.FC = () => {
     state: '',
     search: ''
   });
+
+  const { exportCSV } = useCSVExport();
 
   // Use React Query for data fetching with caching
   const { data: queryData, isLoading: loading } = useQuery({
@@ -25,8 +28,7 @@ export const Mailboxes: React.FC = () => {
   const total = queryData?.total ?? 0;
 
   const handleExport = () => {
-    api.exportCSV(filter);
-    alert("Export started! Check your downloads.");
+    exportCSV(filter);
   };
 
   return (
