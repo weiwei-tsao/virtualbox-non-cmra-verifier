@@ -31,7 +31,7 @@ export const useCSVExport = () => {
       parts.push('Non-CMRA');
     }
 
-    // Add local timestamp in format: 2026_03_14_21_33_16
+    // Add local timestamp in format: 2026-03-14-21-33-16
     const now = new Date();
     const year = now.getFullYear();
     const month = String(now.getMonth() + 1).padStart(2, '0');
@@ -39,11 +39,11 @@ export const useCSVExport = () => {
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
     const seconds = String(now.getSeconds()).padStart(2, '0');
-    const timestamp = `${year}_${month}_${day}_${hours}_${minutes}_${seconds}`;
+    const timestamp = `${year}-${month}-${day}-${hours}-${minutes}-${seconds}`;
 
     parts.push(timestamp);
 
-    return parts.join('-') + '.csv';
+    return parts.join('_') + '.csv';
   };
 
   const exportCSV = async (filter?: MailboxFilter) => {
