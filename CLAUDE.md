@@ -46,6 +46,85 @@ go build -o server cmd/server/main.go
 # Auto-deploys on push, set VITE_API_URL env var
 ```
 
+## Frontend Component Patterns
+
+### Toast Notification System
+
+**Location**: `apps/web/contexts/ToastContext.tsx`, `apps/web/components/Toast.tsx`, `apps/web/components/ToastContainer.tsx`
+
+**Usage**:
+```typescript
+import { useToast } from '../contexts/ToastContext';
+
+const { showToast } = useToast();
+showToast('Operation successful!', 'success');
+showToast('Error occurred', 'error', 5000); // Custom duration
+```
+
+**Types**: `success`, `error`, `info`, `warning`
+
+**Features**:
+- Auto-dismiss (default 5s)
+- Bottom-right positioning
+- Max 3 visible toasts
+- No external dependencies
+
+### Reusable Badge Components
+
+**Location**: `apps/web/components/badges/`
+
+```typescript
+import { RDIBadge, CMRABadge, SourceBadge } from '../components/badges';
+
+<RDIBadge rdi="Commercial" />
+<CMRABadge cmra="Y" />
+<SourceBadge source="ATMB" />
+```
+
+### StatCard Component
+
+**Location**: `apps/web/components/ui/StatCard.tsx`
+
+```typescript
+import { StatCard } from '../components/ui/StatCard';
+
+<StatCard
+  title="Total Mailboxes"
+  value="2,045"
+  icon={<TrendingUp />}
+  color="bg-primary text-primary"
+  onClick={() => setFilter('all')}
+  isActive={filter === 'all'}
+/>
+```
+
+### CSV Export Hook
+
+**Location**: `apps/web/hooks/useCSVExport.ts`
+
+```typescript
+import { useCSVExport } from '../hooks/useCSVExport';
+
+const { exportCSV } = useCSVExport();
+exportCSV(filter); // Automatically shows toast notifications
+```
+
+**Features**:
+- Fetch-based download (better error handling than window.open)
+- Extracts dynamic filename from Content-Disposition header
+- Shows toast notifications for lifecycle events
+- Proper blob cleanup
+
+### Export Filename Format
+
+Exported CSV files use dynamic filenames based on active filters:
+
+- **No filters**: `mailbox-20260313T142530Z.csv`
+- **With filters**: `mailbox-CA-ATMB-Y-Commercial-20260313T142530Z.csv`
+- **Format**: `mailbox-{state}-{source}-{cmra}-{rdi}-{timestamp}.csv`
+- Empty filter segments are skipped
+- Timestamp in UTC (RFC3339 basic format)
+
 ## Architecture Patterns
 
 ### Batch Processing Workflow
