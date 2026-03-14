@@ -12,6 +12,40 @@ const toQueryString = (params: Record<string, string | number | undefined>) =>
 export const useCSVExport = () => {
   const { showToast } = useToast();
 
+  const generateFilename = (filter?: MailboxFilter): string => {
+    const parts: string[] = ['mailbox'];
+
+    // Add filter segments with user-friendly labels (in order: state, source, rdi, cmra)
+    if (filter?.state) {
+      parts.push(filter.state);
+    }
+    if (filter?.source) {
+      parts.push(filter.source);
+    }
+    if (filter?.rdi) {
+      parts.push(filter.rdi);
+    }
+    if (filter?.cmra === 'Y') {
+      parts.push('CMRA');
+    } else if (filter?.cmra === 'N') {
+      parts.push('Non-CMRA');
+    }
+
+    // Add local timestamp in format: 2026_03_14_21_33_16
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const hours = String(now.getHours()).padStart(2, '0');
+    const minutes = String(now.getMinutes()).padStart(2, '0');
+    const seconds = String(now.getSeconds()).padStart(2, '0');
+    const timestamp = `${year}_${month}_${day}_${hours}_${minutes}_${seconds}`;
+
+    parts.push(timestamp);
+
+    return parts.join('-') + '.csv';
+  };
+
   const exportCSV = async (filter?: MailboxFilter) => {
     try {
       showToast('Preparing your export...', 'info', 8000);
@@ -32,16 +66,8 @@ export const useCSVExport = () => {
         throw new Error(`Export failed with status ${response.status}`);
       }
 
-      // Extract filename from Content-Disposition header
-      const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = `mailbox-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)}Z.csv`;
-      if (contentDisposition) {
-        // Handle both quoted and unquoted filenames
-        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-        if (match && match[1]) {
-          filename = match[1].replace(/['"]/g, '').trim();
-        }
-      }
+      // Generate user-friendly filename with local time
+      const filename = generateFilename(filter);
 
       // Trigger download
       const blob = await response.blob();
