@@ -14,7 +14,7 @@ export const useCSVExport = () => {
 
   const exportCSV = async (filter?: MailboxFilter) => {
     try {
-      showToast('Preparing your export...', 'info', 3000);
+      showToast('Preparing your export...', 'info', 8000);
 
       // Build query string
       const qs = filter ? toQueryString({
@@ -34,11 +34,12 @@ export const useCSVExport = () => {
 
       // Extract filename from Content-Disposition header
       const contentDisposition = response.headers.get('Content-Disposition');
-      let filename = 'mailboxes.csv';
+      let filename = `mailbox-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5)}Z.csv`;
       if (contentDisposition) {
-        const match = contentDisposition.match(/filename=(.+)/);
+        // Handle both quoted and unquoted filenames
+        const match = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
         if (match && match[1]) {
-          filename = match[1].replace(/"/g, '');
+          filename = match[1].replace(/['"]/g, '').trim();
         }
       }
 

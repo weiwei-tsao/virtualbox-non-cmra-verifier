@@ -165,7 +165,7 @@ func (r *Router) exportMailboxes(c *gin.Context) {
 	filename := generateExportFilename(query)
 
 	c.Header("Content-Type", "text/csv")
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", filename))
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 
 	writer := csv.NewWriter(c.Writer)
 	defer writer.Flush()

@@ -38,7 +38,7 @@ export const Toast: React.FC<ToastProps> = ({ toast, onClose }) => {
 
   return (
     <div
-      className={`flex items-start gap-3 p-4 rounded-lg border shadow-lg ${getColorClasses()} min-w-80 max-w-md animate-in slide-in-from-bottom-4 duration-300`}
+      className={`flex items-start gap-3 p-4 rounded-lg border shadow-lg ${getColorClasses()} min-w-80 max-w-md animate-in slide-in-from-right-5 fade-in duration-300`}
     >
       <div className="flex-shrink-0">{getIcon()}</div>
       <p className="flex-1 text-sm font-medium">{toast.message}</p>
