@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/crawler"
@@ -77,6 +78,7 @@ func (r *Router) corsMiddleware() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", allowed)
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Header("Access-Control-Expose-Headers", "Content-Disposition")
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusNoContent)
 			c.Abort()
@@ -116,10 +118,34 @@ func (r *Router) listMailboxes(c *gin.Context) {
 	})
 }
 
-func (r *Router) exportMailboxes(c *gin.Context) {
-	c.Header("Content-Type", "text/csv")
-	c.Header("Content-Disposition", "attachment; filename=mailboxes.csv")
+// generateExportFilename creates a descriptive CSV filename based on active filters.
+// Format: mailbox-{filters}-{timestamp}.csv
+// If only default filters (active=true), returns: mailbox-{timestamp}.csv
+func generateExportFilename(query repository.MailboxQuery) string {
+	parts := []string{"mailbox"}
 
+	// Add filter segments in order: state, source, cmra, rdi
+	if query.State != "" {
+		parts = append(parts, query.State)
+	}
+	if query.Source != "" {
+		parts = append(parts, query.Source)
+	}
+	if query.CMRA != "" {
+		parts = append(parts, query.CMRA)
+	}
+	if query.RDI != "" {
+		parts = append(parts, query.RDI)
+	}
+
+	// Add timestamp in RFC3339 basic format (UTC)
+	timestamp := time.Now().UTC().Format("20060102T150405Z")
+	parts = append(parts, timestamp)
+
+	return strings.Join(parts, "-") + ".csv"
+}
+
+func (r *Router) exportMailboxes(c *gin.Context) {
 	// Parse query parameters for filtering
 	activePtr := func() *bool { v := true; return &v }() // default to active only
 	if activeParam := c.Query("active"); activeParam != "" {
@@ -134,6 +160,12 @@ func (r *Router) exportMailboxes(c *gin.Context) {
 		Source: c.Query("source"),
 		Active: activePtr,
 	}
+
+	// Generate dynamic filename based on filters
+	filename := generateExportFilename(query)
+
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 
 	writer := csv.NewWriter(c.Writer)
 	defer writer.Flush()

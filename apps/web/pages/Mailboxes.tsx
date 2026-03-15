@@ -2,8 +2,10 @@ import React, { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MailboxFilter } from '../types';
 import { api } from '../services/api';
-import { Download, Search, Building2, Home, CheckCircle2 } from 'lucide-react';
+import { Download, Search, CheckCircle2 } from 'lucide-react';
 import { US_STATES, SOURCE_OPTIONS, RDI_OPTIONS, CMRA_OPTIONS } from '../constants';
+import { RDIBadge, CMRABadge, SourceBadge } from '../components/badges';
+import { useCSVExport } from '../hooks/useCSVExport';
 
 export const Mailboxes: React.FC = () => {
   const [filter, setFilter] = useState<MailboxFilter>({
@@ -12,6 +14,8 @@ export const Mailboxes: React.FC = () => {
     state: '',
     search: ''
   });
+
+  const { exportCSV } = useCSVExport();
 
   // Use React Query for data fetching with caching
   const { data: queryData, isLoading: loading } = useQuery({
@@ -24,29 +28,7 @@ export const Mailboxes: React.FC = () => {
   const total = queryData?.total ?? 0;
 
   const handleExport = () => {
-    api.exportCSV(filter);
-    alert("Export started! Check your downloads.");
-  };
-
-  const getRDIBadge = (rdi: string) => {
-    if (rdi === 'Commercial') {
-      return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"><Building2 size={12} className="mr-1"/> Commercial</span>
-    }
-    return <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800"><Home size={12} className="mr-1"/> Residential</span>
-  };
-
-  const getCMRABadge = (cmra: string) => {
-    if (cmra === 'Y') {
-      return <span className="inline-flex items-center text-xs text-amber-600 font-medium bg-amber-50 px-2 py-0.5 rounded border border-amber-200">CMRA</span>
-    }
-    return <span className="inline-flex items-center text-xs text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded border border-slate-200">Not CMRA</span>
-  };
-
-  const getSourceBadge = (source: string) => {
-    if (source === 'iPost1') {
-      return <span className="inline-flex items-center text-xs text-purple-600 font-medium bg-purple-50 px-2 py-0.5 rounded border border-purple-200">iPost1</span>
-    }
-    return <span className="inline-flex items-center text-xs text-indigo-600 font-medium bg-indigo-50 px-2 py-0.5 rounded border border-indigo-200">ATMB</span>
+    exportCSV(filter);
   };
 
   return (
@@ -189,13 +171,13 @@ export const Mailboxes: React.FC = () => {
                       <div className="text-sm text-gray-500">{item.city || 'Unknown'}, {item.state || '--'} {item.zip || ''}</div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {getSourceBadge(item.source || 'ATMB')}
+                      <SourceBadge source={item.source || 'ATMB'} />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {getRDIBadge(item.rdi || 'Unknown')}
+                      <RDIBadge rdi={item.rdi || 'Unknown'} />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {getCMRABadge(item.cmra || 'N')}
+                      <CMRABadge cmra={item.cmra || 'N'} />
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       ${Number(item.price || 0).toFixed(2)}/mo

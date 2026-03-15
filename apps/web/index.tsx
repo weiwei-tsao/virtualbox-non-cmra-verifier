@@ -2,6 +2,8 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import App from './App';
+import { ToastProvider } from './contexts/ToastContext';
+import { ToastContainer } from './components/ToastContainer';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -10,6 +12,7 @@ const queryClient = new QueryClient({
       gcTime: 60 * 60 * 1000,    // 1 hour - keep in cache even after unmount
       refetchOnWindowFocus: false,
       refetchOnReconnect: false,
+      retry: false, // Disable retries to prevent multiple failed requests when backend is down
     },
   },
 });
@@ -23,7 +26,10 @@ const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
-      <App />
+      <ToastProvider>
+        <App />
+        <ToastContainer />
+      </ToastProvider>
     </QueryClientProvider>
   </React.StrictMode>
 );
