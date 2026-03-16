@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/config"
 	firestoreclient "github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/firestore"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/repository"
@@ -14,6 +15,9 @@ import (
 
 func main() {
 	ctx := context.Background()
+
+	// Load environment variables from .env files
+	_ = godotenv.Load(".env.local", ".env")
 
 	// Load configuration
 	cfg, err := config.Load()
