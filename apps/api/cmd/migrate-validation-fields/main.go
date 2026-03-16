@@ -112,8 +112,8 @@ func main() {
 			stats.Updated++
 		}
 
-		// Batch update every 400 items to avoid memory issues
-		if len(toUpdate) >= 400 {
+		// Batch update every 50 items (RawHTML field is ~50KB per record, so keep batches small)
+		if len(toUpdate) >= 50 {
 			if err := mailboxRepo.BatchUpsert(ctx, toUpdate); err != nil {
 				log.Fatalf("batch upsert failed: %v", err)
 			}
