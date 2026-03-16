@@ -35,6 +35,13 @@ type Mailbox struct {
 	RawHTML       string    `json:"-" firestore:"rawHTML,omitempty"`             // Original HTML (not exposed to API)
 	ParserVersion string    `json:"parserVersion,omitempty" firestore:"parserVersion,omitempty"` // Parser version (e.g., "v1.0")
 	LastParsedAt  time.Time `json:"lastParsedAt,omitempty" firestore:"lastParsedAt,omitempty"`   // Last parsing timestamp
+	// Validation lifecycle fields
+	ValidationStatus      string    `json:"validationStatus,omitempty" firestore:"validationStatus,omitempty"`           // "pending", "validated", "failed", "needs_revalidation", "retry_scheduled", "manual_review"
+	ValidationAttempts    int       `json:"validationAttempts,omitempty" firestore:"validationAttempts,omitempty"`       // Retry counter (0-5)
+	LastValidationError   string    `json:"lastValidationError,omitempty" firestore:"lastValidationError,omitempty"`     // Error message for debugging
+	NextRetryAt           time.Time `json:"nextRetryAt,omitempty" firestore:"nextRetryAt,omitempty"`                     // Scheduled retry timestamp
+	ValidationPriority    string    `json:"validationPriority,omitempty" firestore:"validationPriority,omitempty"`       // "high", "medium", "low"
+	LastValidationAttempt time.Time `json:"lastValidationAttempt,omitempty" firestore:"lastValidationAttempt,omitempty"` // Last validation attempt timestamp
 }
 
 // CrawlRunStats stores aggregated counters for a crawl job.
