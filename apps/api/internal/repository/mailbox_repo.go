@@ -366,6 +366,58 @@ func (r *MailboxRepository) UpdateValidationStatus(
 	return nil
 }
 
+// ValidationStats represents counts by validation status.
+type ValidationStats struct {
+	Pending         int `json:"pending"`
+	Validated       int `json:"validated"`
+	Failed          int `json:"failed"`
+	NeedsRevalidation int `json:"needsRevalidation"`
+	RetryScheduled  int `json:"retryScheduled"`
+	ManualReview    int `json:"manualReview"`
+	Total           int `json:"total"`
+}
+
+// GetValidationStats returns counts of mailboxes by validation status.
+// Used for dashboard metrics and monitoring.
+func (r *MailboxRepository) GetValidationStats(ctx context.Context) (ValidationStats, error) {
+	stats := ValidationStats{}
+
+	// Count by each status
+	statuses := []string{"pending", "validated", "failed", "needs_revalidation", "retry_scheduled", "manual_review"}
+
+	for _, status := range statuses {
+		query := r.client.Collection("mailboxes").Where("validationStatus", "==", status)
+		countQuery := query.NewAggregationQuery().WithCount("total")
+
+		result, err := countQuery.Get(ctx)
+		if err != nil {
+			return stats, fmt.Errorf("count %s: %w", status, err)
+		}
+
+		countValue := result["total"].(*firestorepb.Value)
+		count := int(countValue.GetIntegerValue())
+
+		switch status {
+		case "pending":
+			stats.Pending = count
+		case "validated":
+			stats.Validated = count
+		case "failed":
+			stats.Failed = count
+		case "needs_revalidation":
+			stats.NeedsRevalidation = count
+		case "retry_scheduled":
+			stats.RetryScheduled = count
+		case "manual_review":
+			stats.ManualReview = count
+		}
+
+		stats.Total += count
+	}
+
+	return stats, nil
+}
+
 func documentID(m model.Mailbox) string {
 	if m.ID != "" {
 		return m.ID

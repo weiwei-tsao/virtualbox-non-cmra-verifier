@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/crawler"
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/validation"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/config"
 	firestoreclient "github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/firestore"
 	apirouter "github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/platform/http"
@@ -62,7 +63,40 @@ func main() {
 	jobManager := crawler.NewJobManager()
 	crawlService := crawler.NewService(fetcher, validator, mailboxRepo, runRepo, statsRepo, 5, cfg.CrawlLinkSeeds, jobManager)
 
-	router := apirouter.NewRouter(mailboxRepo, runRepo, statsRepo, crawlService, cfg.AllowedOrigins)
+	// Load crawler configuration for validation service
+	configLoader := config.NewConfigLoader(firestoreClient)
+	crawlerConfig, err := configLoader.Load(ctx)
+	if err != nil {
+		log.Fatalf("load crawler config: %v", err)
+	}
+	log.Printf("Crawler config loaded - Daily validation budget: %d", crawlerConfig.DailyValidationBudget)
+
+	// Initialize validation service components
+	quotaConfig := validation.QuotaConfig{
+		DailyBudget:         crawlerConfig.DailyValidationBudget,
+		HighPriorityQuota:   crawlerConfig.HighPriorityQuota,
+		MediumPriorityQuota: crawlerConfig.MediumPriorityQuota,
+	}
+	quotaManager := validation.NewQuotaManager(quotaConfig, firestoreClient)
+
+	validationSvc := validation.NewValidationService(
+		validator,
+		mailboxRepo,
+		quotaManager,
+		crawlerConfig,
+		func(msg string) { log.Printf("[validation] %s", msg) },
+	)
+
+	revalidationChk := validation.NewRevalidationChecker(
+		mailboxRepo,
+		crawlerConfig,
+		func(msg string) { log.Printf("[revalidation] %s", msg) },
+	)
+
+	router := apirouter.NewRouter(mailboxRepo, runRepo, statsRepo, crawlService, validationSvc, revalidationChk, cfg.AllowedOrigins)
+
+	// Start background workers
+	startBackgroundWorkers(ctx, validationSvc, revalidationChk)
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -86,4 +120,110 @@ func main() {
 		log.Printf("server shutdown error: %v", err)
 	}
 	log.Println("server exited")
+}
+
+// startBackgroundWorkers starts background tasks for validation processing.
+func startBackgroundWorkers(ctx context.Context, validationSvc *validation.ValidationService, revalidationChk *validation.RevalidationChecker) {
+	// Worker 1: Validation processor (every 5 minutes)
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+
+		log.Println("Background validation worker started (interval: 5 minutes)")
+
+		// Run immediately on startup
+		runValidationWorker(ctx, validationSvc)
+
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Validation worker stopped")
+				return
+			case <-ticker.C:
+				runValidationWorker(ctx, validationSvc)
+			}
+		}
+	}()
+
+	// Worker 2: Revalidation checker (daily at 2 AM UTC)
+	go func() {
+		log.Println("Background revalidation checker started (daily at 2 AM UTC)")
+
+		for {
+			now := time.Now().UTC()
+			next := time.Date(now.Year(), now.Month(), now.Day()+1, 2, 0, 0, 0, time.UTC)
+			if now.Hour() >= 2 {
+				// Already past 2 AM today, schedule for tomorrow
+				next = next.Add(24 * time.Hour)
+			}
+
+			duration := next.Sub(now)
+			log.Printf("Next revalidation check scheduled for %s (in %s)", next.Format("2006-01-02 15:04:05 MST"), duration)
+
+			select {
+			case <-ctx.Done():
+				log.Println("Revalidation checker stopped")
+				return
+			case <-time.After(duration):
+				runRevalidationChecker(ctx, revalidationChk)
+			}
+		}
+	}()
+}
+
+// runValidationWorker processes pending validations and retries.
+func runValidationWorker(ctx context.Context, validationSvc *validation.ValidationService) {
+	workerCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	log.Println("Validation worker running...")
+
+	// Phase 1: Move retry_scheduled → pending if retry time arrived
+	retryCount, err := validationSvc.ProcessRetries(workerCtx)
+	if err != nil {
+		log.Printf("Error processing retries: %v", err)
+	} else if retryCount > 0 {
+		log.Printf("Moved %d mailboxes from retry_scheduled to pending", retryCount)
+	}
+
+	// Phase 2: Process pending validations by priority
+	stats, err := validationSvc.ProcessPendingValidations(workerCtx)
+	if err != nil {
+		log.Printf("Error processing validations: %v", err)
+		return
+	}
+
+	log.Printf("Validation worker completed - High: %d, Medium: %d, Low: %d, Succeeded: %d, Failed: %d, Quota remaining: %d",
+		stats.HighPriorityProcessed,
+		stats.MediumPriorityProcessed,
+		stats.LowPriorityProcessed,
+		stats.Succeeded,
+		stats.Failed,
+		stats.QuotaRemaining,
+	)
+
+	if stats.QuotaExhausted {
+		log.Println("Daily validation quota exhausted")
+	}
+}
+
+// runRevalidationChecker marks old addresses for re-validation.
+func runRevalidationChecker(ctx context.Context, revalidationChk *validation.RevalidationChecker) {
+	checkerCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+
+	log.Println("Revalidation checker running...")
+
+	stats, err := revalidationChk.CheckRevalidationNeeded(checkerCtx)
+	if err != nil {
+		log.Printf("Error checking revalidation: %v", err)
+		return
+	}
+
+	log.Printf("Revalidation check completed - Checked: %d, Needs revalidation: %d, Approaching threshold: %d, Up-to-date: %d",
+		stats.Checked,
+		stats.NeedsRevalidation,
+		stats.ApproachingThreshold,
+		stats.UpToDate,
+	)
 }
