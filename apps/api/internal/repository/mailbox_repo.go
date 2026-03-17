@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	firestorepb "cloud.google.com/go/firestore/apiv1/firestorepb"
@@ -273,6 +274,93 @@ func (r *MailboxRepository) BulkSetActive(ctx context.Context, ids []string, act
 		if _, err := batch.Commit(ctx); err != nil {
 			return fmt.Errorf("bulk set active [%d:%d]: %w", start, end, err)
 		}
+	}
+
+	return nil
+}
+
+// FetchByValidationStatus fetches mailboxes by validation status and optionally by priority.
+// Used by validation service to process pending queue.
+func (r *MailboxRepository) FetchByValidationStatus(ctx context.Context, status, priority string, limit int) ([]model.Mailbox, error) {
+	query := r.client.Collection("mailboxes").
+		Where("validationStatus", "==", status)
+
+	// Add priority filter if specified
+	if priority != "" {
+		query = query.Where("validationPriority", "==", priority)
+	}
+
+	// Order by priority (high first) and nextRetryAt (earliest first)
+	query = query.OrderBy("validationPriority", firestore.Asc).
+		OrderBy("nextRetryAt", firestore.Asc)
+
+	// Apply limit
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	iter := query.Documents(ctx)
+	var results []model.Mailbox
+
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("iterate mailboxes: %w", err)
+		}
+
+		var mb model.Mailbox
+		if err := doc.DataTo(&mb); err != nil {
+			return nil, fmt.Errorf("decode mailbox %s: %w", doc.Ref.ID, err)
+		}
+
+		if mb.ID == "" {
+			mb.ID = doc.Ref.ID
+		}
+
+		results = append(results, mb)
+	}
+
+	return results, nil
+}
+
+// UpdateValidationStatus updates validation-related fields for a single mailbox.
+// Used by validation service to update status after validation attempts.
+func (r *MailboxRepository) UpdateValidationStatus(
+	ctx context.Context,
+	id string,
+	status string,
+	priority string,
+	errorMsg string,
+	nextRetryAt time.Time,
+	attempts int,
+) error {
+	ref := r.client.Collection("mailboxes").Doc(id)
+
+	updates := []firestore.Update{
+		{Path: "validationStatus", Value: status},
+		{Path: "validationPriority", Value: priority},
+		{Path: "validationAttempts", Value: attempts},
+		{Path: "lastValidationAttempt", Value: time.Now()},
+	}
+
+	if errorMsg != "" {
+		updates = append(updates, firestore.Update{
+			Path: "lastValidationError", Value: errorMsg,
+		})
+	}
+
+	if !nextRetryAt.IsZero() {
+		updates = append(updates, firestore.Update{
+			Path: "nextRetryAt", Value: nextRetryAt,
+		})
+	}
+
+	_, err := ref.Update(ctx, updates)
+	if err != nil {
+		return fmt.Errorf("update validation status: %w", err)
 	}
 
 	return nil
