@@ -46,6 +46,20 @@ func (m *mockStore) BatchUpsert(ctx context.Context, mailboxes []model.Mailbox) 
 	return nil
 }
 
+func (m *mockStore) BulkSetActive(ctx context.Context, ids []string, active bool) error {
+	// Mock implementation - update existing map
+	for _, id := range ids {
+		for link, mb := range m.existing {
+			if mb.ID == id {
+				mb.Active = active
+				m.existing[link] = mb
+				break
+			}
+		}
+	}
+	return nil
+}
+
 func TestScrapeAndUpsert(t *testing.T) {
 	sample, err := os.ReadFile("testdata/sample_page.html")
 	if err != nil {
@@ -86,7 +100,7 @@ func TestScrapeAndUpsert(t *testing.T) {
 		links[1]: sample,
 	}
 
-	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, nil, links, "RUN_1", nil, nil)
+	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, links, "ATMB", "RUN_1", nil, nil)
 	if err != nil {
 		t.Fatalf("ScrapeAndUpsert: %v", err)
 	}

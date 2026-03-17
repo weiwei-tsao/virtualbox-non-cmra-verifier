@@ -53,7 +53,7 @@ func (r *MailboxRepository) FetchAllMap(ctx context.Context) (map[string]model.M
 func (r *MailboxRepository) FetchAllMetadata(ctx context.Context) (map[string]model.Mailbox, error) {
 	// Select only the fields needed for scraper deduplication
 	iter := r.client.Collection("mailboxes").
-		Select("link", "dataHash", "cmra", "rdi", "id").
+		Select("link", "dataHash", "cmra", "rdi", "id", "source").
 		Documents(ctx)
 
 	result := make(map[string]model.Mailbox)
@@ -246,6 +246,36 @@ func (r *MailboxRepository) StreamWithQuery(ctx context.Context, q MailboxQuery,
 			return err
 		}
 	}
+}
+
+// BulkSetActive marks multiple mailboxes as active or inactive (soft delete).
+// Used for mark-and-sweep deletion when records are no longer found at source.
+func (r *MailboxRepository) BulkSetActive(ctx context.Context, ids []string, active bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	const batchSize = 500
+	for start := 0; start < len(ids); start += batchSize {
+		end := start + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+
+		batch := r.client.Batch()
+		for _, id := range ids[start:end] {
+			ref := r.client.Collection("mailboxes").Doc(id)
+			batch.Update(ref, []firestore.Update{
+				{Path: "active", Value: active},
+			})
+		}
+
+		if _, err := batch.Commit(ctx); err != nil {
+			return fmt.Errorf("bulk set active [%d:%d]: %w", start, end, err)
+		}
+	}
+
+	return nil
 }
 
 func documentID(m model.Mailbox) string {
