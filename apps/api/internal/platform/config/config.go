@@ -21,6 +21,12 @@ type Config struct {
 	SmartyMock          bool
 	AllowedOrigins      string
 	CrawlLinkSeeds      []string
+
+	// Feature flags for gradual rollout
+	UseAggressiveScraping     bool
+	EnableValidationWorkers   bool
+	EnableRevalidationChecker bool
+	CrawlerConcurrency        int
 }
 
 // Load reads environment variables into a Config with sensible defaults.
@@ -42,6 +48,32 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("parse SMARTY_MOCK: %w", err)
 	}
 	cfg.SmartyMock = mock
+
+	// Parse feature flags
+	useAggressiveScraping, err := parseBoolEnv("USE_AGGRESSIVE_SCRAPING", true)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse USE_AGGRESSIVE_SCRAPING: %w", err)
+	}
+	cfg.UseAggressiveScraping = useAggressiveScraping
+
+	enableValidationWorkers, err := parseBoolEnv("ENABLE_VALIDATION_WORKERS", false)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse ENABLE_VALIDATION_WORKERS: %w", err)
+	}
+	cfg.EnableValidationWorkers = enableValidationWorkers
+
+	enableRevalidationChecker, err := parseBoolEnv("ENABLE_REVALIDATION_CHECKER", false)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse ENABLE_REVALIDATION_CHECKER: %w", err)
+	}
+	cfg.EnableRevalidationChecker = enableRevalidationChecker
+
+	// Parse crawler concurrency (default: 5)
+	concurrency, err := parseIntEnv("CRAWLER_CONCURRENCY", 5)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse CRAWLER_CONCURRENCY: %w", err)
+	}
+	cfg.CrawlerConcurrency = concurrency
 
 	if err := cfg.Validate(); err != nil {
 		return Config{}, err
@@ -105,6 +137,18 @@ func parseBoolEnv(key string, defaultVal bool) (bool, error) {
 	parsed, err := strconv.ParseBool(val)
 	if err != nil {
 		return false, err
+	}
+	return parsed, nil
+}
+
+func parseIntEnv(key string, defaultVal int) (int, error) {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return defaultVal, nil
+	}
+	parsed, err := strconv.Atoi(val)
+	if err != nil {
+		return 0, err
 	}
 	return parsed, nil
 }

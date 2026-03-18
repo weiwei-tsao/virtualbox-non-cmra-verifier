@@ -95,8 +95,14 @@ func main() {
 
 	router := apirouter.NewRouter(mailboxRepo, runRepo, statsRepo, crawlService, validationSvc, revalidationChk, cfg.AllowedOrigins)
 
-	// Start background workers
-	startBackgroundWorkers(ctx, validationSvc, revalidationChk)
+	// Start background workers if enabled (controlled by feature flags)
+	if cfg.EnableValidationWorkers || cfg.EnableRevalidationChecker {
+		startBackgroundWorkers(ctx, validationSvc, revalidationChk, cfg)
+		log.Printf("Background workers enabled - Validation: %v, Revalidation: %v",
+			cfg.EnableValidationWorkers, cfg.EnableRevalidationChecker)
+	} else {
+		log.Println("Background workers disabled (set ENABLE_VALIDATION_WORKERS=true or ENABLE_REVALIDATION_CHECKER=true to enable)")
+	}
 
 	server := &http.Server{
 		Addr:    ":" + cfg.Port,
@@ -123,31 +129,34 @@ func main() {
 }
 
 // startBackgroundWorkers starts background tasks for validation processing.
-func startBackgroundWorkers(ctx context.Context, validationSvc *validation.ValidationService, revalidationChk *validation.RevalidationChecker) {
+func startBackgroundWorkers(ctx context.Context, validationSvc *validation.ValidationService, revalidationChk *validation.RevalidationChecker, cfg config.Config) {
 	// Worker 1: Validation processor (every 5 minutes)
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
+	if cfg.EnableValidationWorkers {
+		go func() {
+			ticker := time.NewTicker(5 * time.Minute)
+			defer ticker.Stop()
 
-		log.Println("Background validation worker started (interval: 5 minutes)")
+			log.Println("Background validation worker started (interval: 5 minutes)")
 
-		// Run immediately on startup
-		runValidationWorker(ctx, validationSvc)
+			// Run immediately on startup
+			runValidationWorker(ctx, validationSvc)
 
-		for {
-			select {
-			case <-ctx.Done():
-				log.Println("Validation worker stopped")
-				return
-			case <-ticker.C:
-				runValidationWorker(ctx, validationSvc)
+			for {
+				select {
+				case <-ctx.Done():
+					log.Println("Validation worker stopped")
+					return
+				case <-ticker.C:
+					runValidationWorker(ctx, validationSvc)
+				}
 			}
-		}
-	}()
+		}()
+	}
 
 	// Worker 2: Revalidation checker (daily at 2 AM UTC)
-	go func() {
-		log.Println("Background revalidation checker started (daily at 2 AM UTC)")
+	if cfg.EnableRevalidationChecker {
+		go func() {
+			log.Println("Background revalidation checker started (daily at 2 AM UTC)")
 
 		for {
 			now := time.Now().UTC()
@@ -168,7 +177,8 @@ func startBackgroundWorkers(ctx context.Context, validationSvc *validation.Valid
 				runRevalidationChecker(ctx, revalidationChk)
 			}
 		}
-	}()
+		}()
+	}
 }
 
 // runValidationWorker processes pending validations and retries.
