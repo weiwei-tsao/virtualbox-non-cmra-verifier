@@ -164,18 +164,33 @@ func (s *ValidationService) processPriority(ctx context.Context, priority string
 		return 0, 0, 0, false
 	}
 
-	// Fetch pending mailboxes for this priority
-	mailboxes, err := s.repository.FetchByValidationStatus(ctx, "pending", priority, quotaLimit)
+	// Fetch mailboxes for this priority (both "pending" and "needs_revalidation")
+	// Split quota between the two statuses
+	pendingLimit := quotaLimit / 2
+	revalidationLimit := quotaLimit - pendingLimit
+
+	pendingMailboxes, err := s.repository.FetchByValidationStatus(ctx, "pending", priority, pendingLimit)
 	if err != nil {
 		if s.logFn != nil {
-			s.logFn(fmt.Sprintf("Error fetching %s priority mailboxes: %v", priority, err))
+			s.logFn(fmt.Sprintf("Error fetching pending %s priority mailboxes: %v", priority, err))
 		}
 		return 0, 0, 0, false
 	}
 
+	revalidationMailboxes, err := s.repository.FetchByValidationStatus(ctx, "needs_revalidation", priority, revalidationLimit)
+	if err != nil {
+		if s.logFn != nil {
+			s.logFn(fmt.Sprintf("Error fetching revalidation %s priority mailboxes: %v", priority, err))
+		}
+		return 0, 0, 0, false
+	}
+
+	// Combine both lists
+	mailboxes := append(pendingMailboxes, revalidationMailboxes...)
+
 	if len(mailboxes) == 0 {
 		if s.logFn != nil {
-			s.logFn(fmt.Sprintf("No pending %s priority mailboxes", priority))
+			s.logFn(fmt.Sprintf("No pending or revalidation %s priority mailboxes", priority))
 		}
 		return 0, 0, 0, false
 	}

@@ -290,9 +290,10 @@ func (r *MailboxRepository) FetchByValidationStatus(ctx context.Context, status,
 		query = query.Where("validationPriority", "==", priority)
 	}
 
-	// Order by priority (high first) and nextRetryAt (earliest first)
-	query = query.OrderBy("validationPriority", firestore.Asc).
-		OrderBy("nextRetryAt", firestore.Asc)
+	// Note: OrderBy requires composite index. For now, fetch without ordering
+	// and let the service handle prioritization
+	// TODO: Enable once composite index (validationStatus, validationPriority, nextRetryAt) is built
+	// query = query.OrderBy("validationPriority", firestore.Asc).OrderBy("nextRetryAt", firestore.Asc)
 
 	// Apply limit
 	if limit > 0 {
