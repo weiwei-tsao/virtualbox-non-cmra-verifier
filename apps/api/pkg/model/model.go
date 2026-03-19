@@ -69,6 +69,42 @@ type ErrorSample struct {
 	Reason string `json:"reason,omitempty" firestore:"reason,omitempty"`
 }
 
+// ValidationRunStats stores aggregated counters for a validation job.
+type ValidationRunStats struct {
+	HighPriorityProcessed   int  `json:"highPriorityProcessed,omitempty" firestore:"highPriorityProcessed,omitempty"`
+	MediumPriorityProcessed int  `json:"mediumPriorityProcessed,omitempty" firestore:"mediumPriorityProcessed,omitempty"`
+	LowPriorityProcessed    int  `json:"lowPriorityProcessed,omitempty" firestore:"lowPriorityProcessed,omitempty"`
+	Succeeded               int  `json:"succeeded,omitempty" firestore:"succeeded,omitempty"`
+	Failed                  int  `json:"failed,omitempty" firestore:"failed,omitempty"`
+	QuotaExhausted          bool `json:"quotaExhausted,omitempty" firestore:"quotaExhausted,omitempty"`
+	QuotaRemaining          int  `json:"quotaRemaining,omitempty" firestore:"quotaRemaining,omitempty"`
+}
+
+// ValidationRun tracks the lifecycle of a validation execution.
+type ValidationRun struct {
+	RunID      string             `json:"runId,omitempty" firestore:"runId,omitempty"`
+	Status     string             `json:"status,omitempty" firestore:"status,omitempty"` // running, success, partial, failed
+	Stats      ValidationRunStats `json:"stats,omitempty" firestore:"stats,omitempty"`
+	StartedAt  time.Time          `json:"startedAt,omitempty" firestore:"startedAt,omitempty"`
+	FinishedAt time.Time          `json:"finishedAt,omitempty" firestore:"finishedAt,omitempty"`
+
+	ItemsSample  []ValidationItem `json:"itemsSample,omitempty" firestore:"itemsSample,omitempty"`
+	ErrorsSample []ErrorSample    `json:"errorsSample,omitempty" firestore:"errorsSample,omitempty"`
+
+	TriggerType string `json:"triggerType,omitempty" firestore:"triggerType,omitempty"` // manual, automatic, revalidation
+}
+
+// ValidationItem represents a single validation result in a run.
+type ValidationItem struct {
+	MailboxID string `json:"mailboxId,omitempty" firestore:"mailboxId,omitempty"`
+	Name      string `json:"name,omitempty" firestore:"name,omitempty"`
+	Address   string `json:"address,omitempty" firestore:"address,omitempty"`
+	Status    string `json:"status,omitempty" firestore:"status,omitempty"` // validated, failed, retry_scheduled
+	Error     string `json:"error,omitempty" firestore:"error,omitempty"`
+	CMRA      string `json:"cmra,omitempty" firestore:"cmra,omitempty"`
+	RDI       string `json:"rdi,omitempty" firestore:"rdi,omitempty"`
+}
+
 // SystemStats is a singleton document that pre-aggregates dashboard metrics.
 type SystemStats struct {
 	LastUpdated      time.Time      `json:"lastUpdated,omitempty" firestore:"lastUpdated,omitempty"`

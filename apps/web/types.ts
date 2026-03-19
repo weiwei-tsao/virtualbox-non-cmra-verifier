@@ -64,6 +64,33 @@ export interface ValidationStats {
   total: number;
 }
 
+export interface ValidationRun {
+  runId: string;
+  status: 'running' | 'success' | 'partial' | 'failed';
+  startedAt: string;
+  finishedAt?: string;
+  stats: {
+    highPriorityProcessed: number;
+    mediumPriorityProcessed: number;
+    lowPriorityProcessed: number;
+    succeeded: number;
+    failed: number;
+    quotaExhausted: boolean;
+    quotaRemaining: number;
+  };
+  itemsSample?: Array<{
+    mailboxId: string;
+    name: string;
+    address: string;
+    status: string;
+    error: string;
+    cmra: string;
+    rdi: string;
+  }>;
+  errorsSample?: Array<{ link: string; reason: string }>;
+  triggerType: 'manual' | 'automatic' | 'revalidation';
+}
+
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 export interface Toast {

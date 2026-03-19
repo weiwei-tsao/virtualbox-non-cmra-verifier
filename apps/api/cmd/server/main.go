@@ -46,6 +46,7 @@ func main() {
 
 	mailboxRepo := repository.NewMailboxRepository(firestoreClient)
 	runRepo := repository.NewRunRepository(firestoreClient)
+	validationRunRepo := repository.NewValidationRunRepository(firestoreClient)
 	statsRepo := repository.NewStatsRepository(firestoreClient)
 
 	fetcher := crawler.NewHTTPFetcher()
@@ -82,6 +83,7 @@ func main() {
 	validationSvc := validation.NewValidationService(
 		validator,
 		mailboxRepo,
+		validationRunRepo,
 		quotaManager,
 		crawlerConfig,
 		func(msg string) { log.Printf("[validation] %s", msg) },
@@ -93,7 +95,7 @@ func main() {
 		func(msg string) { log.Printf("[revalidation] %s", msg) },
 	)
 
-	router := apirouter.NewRouter(mailboxRepo, runRepo, statsRepo, crawlService, validationSvc, revalidationChk, cfg.AllowedOrigins)
+	router := apirouter.NewRouter(mailboxRepo, runRepo, validationRunRepo, statsRepo, crawlService, validationSvc, revalidationChk, cfg.AllowedOrigins)
 
 	// Start background workers if enabled (controlled by feature flags)
 	if cfg.EnableValidationWorkers || cfg.EnableRevalidationChecker {

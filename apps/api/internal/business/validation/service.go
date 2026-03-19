@@ -20,20 +20,36 @@ type MailboxRepository interface {
 	UpdateValidationStatus(ctx context.Context, id string, status string, priority string, error string, nextRetryAt time.Time, attempts int) error
 }
 
+// ValidationRunRepository defines the interface for validation run operations.
+type ValidationRunRepository interface {
+	CreateRun(ctx context.Context, run *model.ValidationRun) error
+	UpdateRun(ctx context.Context, run *model.ValidationRun) error
+	GetRun(ctx context.Context, runID string) (*model.ValidationRun, error)
+	ListRuns(ctx context.Context, limit int) ([]model.ValidationRun, error)
+	UpdateStatus(ctx context.Context, runID string, status string) error
+	UpdateStats(ctx context.Context, runID string, stats model.ValidationRunStats) error
+}
+
 // ValidationService orchestrates the validation process with quota management and retry logic.
 type ValidationService struct {
-	validator    ValidationClient
-	repository   MailboxRepository
-	quotaManager *QuotaManager
-	batchHandler *BatchHandler
-	config       model.CrawlerConfig
-	logFn        func(string)
+	validator         ValidationClient
+	repository        MailboxRepository
+	runRepository     ValidationRunRepository
+	quotaManager      *QuotaManager
+	batchHandler      *BatchHandler
+	config            model.CrawlerConfig
+	logFn             func(string)
+	currentRunID      string // Track current run ID
+	itemsSample       []model.ValidationItem
+	errorsSample      []model.ErrorSample
+	maxSampleSize     int
 }
 
 // NewValidationService creates a new validation service.
 func NewValidationService(
 	validator ValidationClient,
 	repository MailboxRepository,
+	runRepository ValidationRunRepository,
 	quotaManager *QuotaManager,
 	config model.CrawlerConfig,
 	logFn func(string),
@@ -54,12 +70,16 @@ func NewValidationService(
 	)
 
 	return &ValidationService{
-		validator:    validator,
-		repository:   repository,
-		quotaManager: quotaManager,
-		batchHandler: batchHandler,
-		config:       config,
-		logFn:        logFn,
+		validator:     validator,
+		repository:    repository,
+		runRepository: runRepository,
+		quotaManager:  quotaManager,
+		batchHandler:  batchHandler,
+		config:        config,
+		logFn:         logFn,
+		itemsSample:   []model.ValidationItem{},
+		errorsSample:  []model.ErrorSample{},
+		maxSampleSize: 50,
 	}
 }
 
@@ -89,13 +109,36 @@ type ValidationStats struct {
 func (s *ValidationService) ProcessPendingValidations(ctx context.Context) (ValidationStats, error) {
 	stats := ValidationStats{}
 
+	// Generate run ID
+	runID := fmt.Sprintf("validation_%d", time.Now().Unix())
+	s.currentRunID = runID
+	s.itemsSample = []model.ValidationItem{}
+	s.errorsSample = []model.ErrorSample{}
+
+	// Create validation run record
+	run := &model.ValidationRun{
+		RunID:       runID,
+		Status:      "running",
+		StartedAt:   time.Now(),
+		TriggerType: "automatic",
+		Stats:       model.ValidationRunStats{},
+	}
+
+	if err := s.runRepository.CreateRun(ctx, run); err != nil {
+		if s.logFn != nil {
+			s.logFn(fmt.Sprintf("Failed to create validation run: %v", err))
+		}
+		// Continue even if run creation fails
+	}
+
 	if s.logFn != nil {
-		s.logFn("Starting validation processing...")
+		s.logFn(fmt.Sprintf("Starting validation processing (run: %s)...", runID))
 	}
 
 	// Check available quota
 	highQuota, mediumQuota, lowQuota, err := s.quotaManager.GetAvailableQuota(ctx)
 	if err != nil {
+		s.finalizeRun(ctx, "failed", stats)
 		return stats, fmt.Errorf("get quota: %w", err)
 	}
 
@@ -104,6 +147,7 @@ func (s *ValidationService) ProcessPendingValidations(ctx context.Context) (Vali
 		if s.logFn != nil {
 			s.logFn("Daily quota exhausted, skipping validation")
 		}
+		s.finalizeRun(ctx, "success", stats)
 		return stats, nil
 	}
 
@@ -119,8 +163,12 @@ func (s *ValidationService) ProcessPendingValidations(ctx context.Context) (Vali
 		stats.Succeeded += succeeded
 		stats.Failed += failed
 
+		// Update progress
+		s.updateRunStats(ctx, stats)
+
 		if quotaHit {
 			stats.QuotaExhausted = true
+			s.finalizeRun(ctx, "partial", stats)
 			return stats, nil
 		}
 	}
@@ -132,8 +180,12 @@ func (s *ValidationService) ProcessPendingValidations(ctx context.Context) (Vali
 		stats.Succeeded += succeeded
 		stats.Failed += failed
 
+		// Update progress
+		s.updateRunStats(ctx, stats)
+
 		if quotaHit {
 			stats.QuotaExhausted = true
+			s.finalizeRun(ctx, "partial", stats)
 			return stats, nil
 		}
 	}
@@ -145,6 +197,9 @@ func (s *ValidationService) ProcessPendingValidations(ctx context.Context) (Vali
 		stats.Succeeded += succeeded
 		stats.Failed += failed
 
+		// Update progress
+		s.updateRunStats(ctx, stats)
+
 		if quotaHit {
 			stats.QuotaExhausted = true
 		}
@@ -153,6 +208,13 @@ func (s *ValidationService) ProcessPendingValidations(ctx context.Context) (Vali
 	// Get remaining quota
 	high, medium, low, _ := s.quotaManager.GetAvailableQuota(ctx)
 	stats.QuotaRemaining = high + medium + low
+
+	// Finalize run
+	status := "success"
+	if stats.QuotaExhausted {
+		status = "partial"
+	}
+	s.finalizeRun(ctx, status, stats)
 
 	return stats, nil
 }
@@ -220,6 +282,15 @@ func (s *ValidationService) processPriority(ctx context.Context, priority string
 			for j := range result.Succeeded {
 				result.Succeeded[j].ValidationAttempts = 0
 				result.Succeeded[j].LastValidationError = ""
+
+				// Record sample
+				s.recordValidationItem(
+					result.Succeeded[j],
+					"validated",
+					result.Succeeded[j].CMRA,
+					result.Succeeded[j].RDI,
+					"",
+				)
 			}
 
 			if err := s.repository.BatchUpsert(ctx, result.Succeeded); err != nil {
@@ -298,6 +369,12 @@ func (s *ValidationService) handleFailedValidations(ctx context.Context, failed 
 			nextRetryAt = CalculateNextRetryTime(backoffConfig, attempts)
 		}
 
+		// Record error sample
+		s.recordError(mb.Link, item.Error.Error())
+
+		// Record validation item
+		s.recordValidationItem(mb, status, "", "", item.Error.Error())
+
 		// Update validation status
 		err := s.repository.UpdateValidationStatus(
 			ctx,
@@ -352,4 +429,98 @@ func (s *ValidationService) ProcessRetries(ctx context.Context) (int, error) {
 	}
 
 	return count, nil
+}
+
+// updateRunStats updates the validation run with current stats.
+func (s *ValidationService) updateRunStats(ctx context.Context, stats ValidationStats) {
+	if s.currentRunID == "" {
+		return
+	}
+
+	runStats := model.ValidationRunStats{
+		HighPriorityProcessed:   stats.HighPriorityProcessed,
+		MediumPriorityProcessed: stats.MediumPriorityProcessed,
+		LowPriorityProcessed:    stats.LowPriorityProcessed,
+		Succeeded:               stats.Succeeded,
+		Failed:                  stats.Failed,
+		QuotaExhausted:          stats.QuotaExhausted,
+		QuotaRemaining:          stats.QuotaRemaining,
+	}
+
+	if err := s.runRepository.UpdateStats(ctx, s.currentRunID, runStats); err != nil {
+		if s.logFn != nil {
+			s.logFn(fmt.Sprintf("Failed to update run stats: %v", err))
+		}
+	}
+}
+
+// finalizeRun marks the validation run as complete.
+func (s *ValidationService) finalizeRun(ctx context.Context, status string, stats ValidationStats) {
+	if s.currentRunID == "" {
+		return
+	}
+
+	// Get remaining quota
+	high, medium, low, _ := s.quotaManager.GetAvailableQuota(ctx)
+	stats.QuotaRemaining = high + medium + low
+
+	// Update final stats
+	s.updateRunStats(ctx, stats)
+
+	// Update status
+	if err := s.runRepository.UpdateStatus(ctx, s.currentRunID, status); err != nil {
+		if s.logFn != nil {
+			s.logFn(fmt.Sprintf("Failed to finalize run: %v", err))
+		}
+	}
+
+	// Update run with samples
+	run, err := s.runRepository.GetRun(ctx, s.currentRunID)
+	if err == nil {
+		run.ItemsSample = s.itemsSample
+		run.ErrorsSample = s.errorsSample
+		s.runRepository.UpdateRun(ctx, run)
+	}
+
+	if s.logFn != nil {
+		s.logFn(fmt.Sprintf("Validation run %s completed with status: %s", s.currentRunID, status))
+	}
+
+	// Reset tracking
+	s.currentRunID = ""
+	s.itemsSample = []model.ValidationItem{}
+	s.errorsSample = []model.ErrorSample{}
+}
+
+// recordValidationItem adds a validation item to the sample.
+func (s *ValidationService) recordValidationItem(mb model.Mailbox, status string, cmra string, rdi string, errMsg string) {
+	if len(s.itemsSample) >= s.maxSampleSize {
+		return
+	}
+
+	item := model.ValidationItem{
+		MailboxID: mb.ID,
+		Name:      mb.Name,
+		Address:   fmt.Sprintf("%s, %s, %s %s", mb.AddressRaw.Street, mb.AddressRaw.City, mb.AddressRaw.State, mb.AddressRaw.Zip),
+		Status:    status,
+		Error:     errMsg,
+		CMRA:      cmra,
+		RDI:       rdi,
+	}
+
+	s.itemsSample = append(s.itemsSample, item)
+}
+
+// recordError adds an error to the sample.
+func (s *ValidationService) recordError(link string, reason string) {
+	if len(s.errorsSample) >= s.maxSampleSize {
+		return
+	}
+
+	errorSample := model.ErrorSample{
+		Link:   link,
+		Reason: reason,
+	}
+
+	s.errorsSample = append(s.errorsSample, errorSample)
 }

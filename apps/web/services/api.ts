@@ -1,4 +1,4 @@
-import { Mailbox, CrawlRun, MailboxFilter, Stats, ValidationStats } from '../types';
+import { Mailbox, CrawlRun, MailboxFilter, Stats, ValidationStats, ValidationRun } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
@@ -169,6 +169,17 @@ export const api = {
     const res = await request('/api/validation/revalidation/check', {
       method: 'POST',
     });
+    return res.json();
+  },
+
+  getValidationRuns: async (): Promise<ValidationRun[]> => {
+    const res = await request(`/api/validation/runs?ts=${Date.now()}`);
+    const data = await res.json();
+    return data.items || [];
+  },
+
+  getValidationRun: async (runId: string): Promise<ValidationRun> => {
+    const res = await request(`/api/validation/runs/${encodeURIComponent(runId)}?ts=${Date.now()}`);
     return res.json();
   },
 };

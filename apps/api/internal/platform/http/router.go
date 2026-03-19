@@ -19,6 +19,7 @@ import (
 type Router struct {
 	mailboxes       *repository.MailboxRepository
 	runs            *repository.RunRepository
+	validationRuns  *repository.ValidationRunRepository
 	stats           *repository.StatsRepository
 	crawler         *crawler.Service
 	validationSvc   *validation.ValidationService
@@ -29,6 +30,7 @@ type Router struct {
 func NewRouter(
 	mailboxes *repository.MailboxRepository,
 	runs *repository.RunRepository,
+	validationRuns *repository.ValidationRunRepository,
 	stats *repository.StatsRepository,
 	crawlerSvc *crawler.Service,
 	validationSvc *validation.ValidationService,
@@ -38,6 +40,7 @@ func NewRouter(
 	r := &Router{
 		mailboxes:       mailboxes,
 		runs:            runs,
+		validationRuns:  validationRuns,
 		stats:           stats,
 		crawler:         crawlerSvc,
 		validationSvc:   validationSvc,
@@ -70,6 +73,8 @@ func NewRouter(
 		// Validation endpoints
 		api.POST("/validation/run", r.runValidation)
 		api.GET("/validation/stats", r.getValidationStats)
+		api.GET("/validation/runs", r.listValidationRuns)
+		api.GET("/validation/runs/:runId", r.getValidationRun)
 		api.POST("/validation/revalidation/check", r.checkRevalidation)
 	}
 
@@ -404,4 +409,29 @@ func (r *Router) checkRevalidation(c *gin.Context) {
 		"message": "Revalidation check completed",
 		"stats":   stats,
 	})
+}
+
+func (r *Router) listValidationRuns(c *gin.Context) {
+	runs, err := r.validationRuns.ListRuns(c.Request.Context(), 20)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": runs})
+}
+
+func (r *Router) getValidationRun(c *gin.Context) {
+	runID := c.Param("runId")
+	if runID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "runId is required"})
+		return
+	}
+
+	run, err := r.validationRuns.GetRun(c.Request.Context(), runID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, run)
 }

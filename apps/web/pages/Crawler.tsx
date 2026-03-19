@@ -29,6 +29,15 @@ export const Crawler: React.FC = () => {
     refetchInterval: 10000, // Refresh every 10 seconds
   });
 
+  const { data: validationRuns = [] } = useQuery({
+    queryKey: ['validationRuns'],
+    queryFn: api.getValidationRuns,
+    refetchInterval: (query) => {
+      const hasRunning = query.state.data?.some((r) => r.status === 'running');
+      return hasRunning ? 5000 : false;
+    },
+  });
+
   const cancelMutation = useMutation({
     mutationFn: api.cancelCrawlRun,
     onSuccess: () => {
@@ -93,7 +102,18 @@ export const Crawler: React.FC = () => {
     }
   };
 
-  const latestRun = runs[0];
+  const latestCrawlRun = runs[0];
+  const latestValidationRun = validationRuns[0];
+
+  const getValidationStatusColor = (status: string) => {
+    switch (status) {
+      case 'success': return 'bg-green-100 text-green-800';
+      case 'partial': return 'bg-amber-100 text-amber-800';
+      case 'failed': return 'bg-red-100 text-red-800';
+      case 'running': return 'bg-blue-100 text-blue-800 animate-pulse';
+      default: return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -122,8 +142,8 @@ export const Crawler: React.FC = () => {
         </div>
       </div>
 
-      {/* Active Job Card */}
-      {latestRun && latestRun.status === 'running' && (
+      {/* Active Crawl Job Card */}
+      {latestCrawlRun && latestCrawlRun.status === 'running' && (
         <div className="rounded-md bg-blue-50 p-4 border border-blue-200">
           <div className="flex">
             <div className="flex-shrink-0">
@@ -131,7 +151,7 @@ export const Crawler: React.FC = () => {
             </div>
             <div className="ml-3 flex-1 md:flex md:justify-between">
               <p className="text-sm text-blue-700">
-                Crawl job <strong>{latestRun.id}</strong> is running. Found {latestRun.stats?.found ?? 0} locations so far.
+                Crawl job <strong>{latestCrawlRun.id}</strong> is running. Found {latestCrawlRun.stats?.found ?? 0} locations so far.
               </p>
               <div className="mt-3 flex gap-4 md:mt-0 md:ml-6">
                 <span className="whitespace-nowrap font-medium text-blue-700 hover:text-blue-600 cursor-pointer" onClick={refresh}>
@@ -139,7 +159,7 @@ export const Crawler: React.FC = () => {
                 </span>
                 <span
                   className="whitespace-nowrap font-medium text-red-600 hover:text-red-500 cursor-pointer"
-                  onClick={() => handleCancel(latestRun.id)}
+                  onClick={() => handleCancel(latestCrawlRun.id)}
                 >
                   Cancel Job
                 </span>
@@ -149,7 +169,24 @@ export const Crawler: React.FC = () => {
         </div>
       )}
 
-      {/* Validation Stats Card */}
+      {/* Active Validation Job Card */}
+      {latestValidationRun && latestValidationRun.status === 'running' && (
+        <div className="rounded-md bg-purple-50 p-4 border border-purple-200">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <Shield className="h-5 w-5 text-purple-400 animate-pulse" aria-hidden="true" />
+            </div>
+            <div className="ml-3 flex-1">
+              <p className="text-sm text-purple-700">
+                Validation job <strong>{latestValidationRun.runId}</strong> is running.
+                Processed {latestValidationRun.stats?.succeeded ?? 0} addresses so far.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Validation Queue Status Card */}
       {validationStats && (
         <div className="bg-white shadow rounded-lg border border-gray-200 p-6">
           <div className="flex items-center justify-between mb-4">
@@ -182,7 +219,7 @@ export const Crawler: React.FC = () => {
         </div>
       )}
 
-      {/* Crawl History List */}
+      {/* Crawl Job History Section */}
       <div className="bg-white shadow overflow-hidden sm:rounded-md border border-gray-200">
         <div className="px-4 py-5 sm:px-6 border-b border-gray-200 flex justify-between items-center">
           <h3 className="text-lg leading-6 font-medium text-gray-900">Crawl Job History</h3>
@@ -192,7 +229,7 @@ export const Crawler: React.FC = () => {
         {!isLoading && runs.length === 0 && <div className="p-4 text-sm text-gray-500">No crawl jobs yet. Click "Start Crawl" to discover new addresses.</div>}
         {!isLoading && runs.length > 0 && (
           <ul role="list" className="divide-y divide-gray-200">
-            {runs.map((run) => (
+            {runs.slice(0, 5).map((run) => (
               <li key={run.id}>
                 <div className="px-4 py-4 sm:px-6">
                   <div className="flex items-center justify-between">
@@ -233,7 +270,69 @@ export const Crawler: React.FC = () => {
                       </p>
                     </div>
                   </div>
-                  {/* Error Logs Preview */}
+                  {run.errorsSample && run.errorsSample.length > 0 && (
+                    <div className="mt-3 bg-red-50 p-2 rounded text-xs text-red-800 font-mono">
+                      <p className="font-bold mb-1">Errors:</p>
+                      {run.errorsSample.map((e, idx) => (
+                        <div key={idx} className="truncate">[{e.reason}] {e.link}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      {/* Validation Job History Section */}
+      <div className="bg-white shadow overflow-hidden sm:rounded-md border border-gray-200">
+        <div className="px-4 py-5 sm:px-6 border-b border-gray-200 flex justify-between items-center">
+          <h3 className="text-lg leading-6 font-medium text-gray-900">Validation Job History</h3>
+          <button onClick={() => queryClient.invalidateQueries({ queryKey: ['validationRuns'] })} className="text-gray-400 hover:text-gray-600">
+            <RotateCw size={16}/>
+          </button>
+        </div>
+        {validationRuns.length === 0 && <div className="p-4 text-sm text-gray-500">No validation jobs yet. Click "Start Validation" to process pending addresses.</div>}
+        {validationRuns.length > 0 && (
+          <ul role="list" className="divide-y divide-gray-200">
+            {validationRuns.slice(0, 5).map((run) => (
+              <li key={run.runId}>
+                <div className="px-4 py-4 sm:px-6">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-medium text-primary truncate">{run.runId}</p>
+                    <div className="ml-2 flex-shrink-0">
+                      <p className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getValidationStatusColor(run.status)}`}>
+                        {run.status.toUpperCase()}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="mt-2 sm:flex sm:justify-between">
+                    <div className="sm:flex">
+                      <p className="flex items-center text-sm text-gray-500 mr-6">
+                        <CheckCircle className="flex-shrink-0 mr-1.5 h-4 w-4 text-green-400" />
+                        Succeeded: {run.stats?.succeeded ?? 0}
+                      </p>
+                      {run.stats?.failed ? (
+                        <p className="flex items-center text-sm text-gray-500 mr-6">
+                          <AlertTriangle className="flex-shrink-0 mr-1.5 h-4 w-4 text-red-400" />
+                          Failed: {run.stats.failed}
+                        </p>
+                      ) : null}
+                      {run.stats?.quotaExhausted && (
+                        <p className="flex items-center text-sm text-amber-600">
+                          <AlertTriangle className="flex-shrink-0 mr-1.5 h-4 w-4" />
+                          Quota Exhausted
+                        </p>
+                      )}
+                    </div>
+                    <div className="mt-2 flex items-center text-sm text-gray-500 sm:mt-0">
+                      <Clock className="flex-shrink-0 mr-1.5 h-4 w-4 text-gray-400" />
+                      <p>
+                        Started {run.startedAt ? new Date(run.startedAt).toLocaleString() : '—'}
+                      </p>
+                    </div>
+                  </div>
                   {run.errorsSample && run.errorsSample.length > 0 && (
                     <div className="mt-3 bg-red-50 p-2 rounded text-xs text-red-800 font-mono">
                       <p className="font-bold mb-1">Errors:</p>
