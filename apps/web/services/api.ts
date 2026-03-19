@@ -1,4 +1,4 @@
-import { Mailbox, CrawlRun, MailboxFilter, Stats } from '../types';
+import { Mailbox, CrawlRun, MailboxFilter, Stats, ValidationStats } from '../types';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
@@ -150,5 +150,25 @@ export const api = {
     const url = `${API_BASE}/api/mailboxes/export${qs ? `?${qs}` : ''}`;
     window.open(url, '_blank');
     return true;
-  }
+  },
+
+  // Validation endpoints
+  triggerValidation: async (): Promise<{ message: string; stats: any }> => {
+    const res = await request('/api/validation/run', {
+      method: 'POST',
+    });
+    return res.json();
+  },
+
+  getValidationStats: async (): Promise<ValidationStats> => {
+    const res = await request('/api/validation/stats');
+    return res.json();
+  },
+
+  triggerRevalidationCheck: async (): Promise<{ message: string; stats: any }> => {
+    const res = await request('/api/validation/revalidation/check', {
+      method: 'POST',
+    });
+    return res.json();
+  },
 };

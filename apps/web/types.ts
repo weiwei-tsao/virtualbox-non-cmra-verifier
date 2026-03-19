@@ -54,6 +54,16 @@ export interface Stats {
   lastUpdated?: string;
 }
 
+export interface ValidationStats {
+  pending: number;
+  validated: number;
+  failed: number;
+  needsRevalidation: number;
+  retryScheduled: number;
+  manualReview: number;
+  total: number;
+}
+
 export type ToastType = 'success' | 'error' | 'info' | 'warning';
 
 export interface Toast {
