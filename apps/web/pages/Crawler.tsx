@@ -301,7 +301,12 @@ export const Crawler: React.FC = () => {
                 <div className="px-4 py-4 sm:px-6">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium text-primary truncate">{run.runId}</p>
-                    <div className="ml-2 flex-shrink-0">
+                    <div className="ml-2 flex-shrink-0 flex items-center gap-2">
+                      {run.triggerType === 'manual' && (
+                        <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-indigo-100 text-indigo-800">
+                          MANUAL
+                        </span>
+                      )}
                       <p className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${getValidationStatusColor(run.status)}`}>
                         {run.status.toUpperCase()}
                       </p>

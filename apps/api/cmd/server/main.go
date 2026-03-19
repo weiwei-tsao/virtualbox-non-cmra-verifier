@@ -199,7 +199,7 @@ func runValidationWorker(ctx context.Context, validationSvc *validation.Validati
 	}
 
 	// Phase 2: Process pending validations by priority
-	stats, err := validationSvc.ProcessPendingValidations(workerCtx)
+	stats, err := validationSvc.ProcessPendingValidations(workerCtx, "automatic")
 	if err != nil {
 		log.Printf("Error processing validations: %v", err)
 		return

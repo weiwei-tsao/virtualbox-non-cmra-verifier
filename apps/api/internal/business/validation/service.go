@@ -106,8 +106,13 @@ type ValidationStats struct {
 //  - High: 50% of daily budget
 //  - Medium: 30% of daily budget
 //  - Low: 20% of daily budget
-func (s *ValidationService) ProcessPendingValidations(ctx context.Context) (ValidationStats, error) {
+func (s *ValidationService) ProcessPendingValidations(ctx context.Context, triggerType string) (ValidationStats, error) {
 	stats := ValidationStats{}
+
+	// Default trigger type if not provided
+	if triggerType == "" {
+		triggerType = "automatic"
+	}
 
 	// Generate run ID
 	runID := fmt.Sprintf("validation_%d", time.Now().Unix())
@@ -120,7 +125,7 @@ func (s *ValidationService) ProcessPendingValidations(ctx context.Context) (Vali
 		RunID:       runID,
 		Status:      "running",
 		StartedAt:   time.Now(),
-		TriggerType: "automatic",
+		TriggerType: triggerType,
 		Stats:       model.ValidationRunStats{},
 	}
 
