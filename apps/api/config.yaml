@@ -1,0 +1,33 @@
+# Crawler Configuration
+# This file provides default settings for scraping and validation.
+# Values here override code defaults but can be overridden by:
+# - Environment variables (CRAWLER_* prefix)
+# - Database settings (Firestore system_config/crawler_config)
+# - Per-job parameters (API request body)
+
+# Scraping settings
+workerCount: 5           # Number of concurrent scraping workers
+scrapeBatchSize: 20      # Items to collect before batch write
+scrapeTimeout: 30m       # Timeout for entire scrape job
+
+# Validation settings
+validationBatchSize: 100       # Smarty API batch size (max 100)
+validationWorkerCount: 3       # Concurrent validation workers
+maxRetryAttempts: 5            # Max retries for transient failures
+retryBackoffBase: 1s           # Initial backoff duration
+retryBackoffMultiplier: 2.0    # Exponential backoff multiplier
+retryBackoffJitter: 0.1        # Random jitter (±10%)
+
+# Re-validation settings
+revalidationInterval: 2160h    # 90 days (90 * 24h)
+revalidationThreshold: 1680h   # 70 days (start priority increase)
+
+# Quota management
+dailyValidationBudget: 10000   # Daily Smarty API calls limit
+highPriorityQuota: 5000        # 50% for new addresses
+mediumPriorityQuota: 3000      # 30% for approaching revalidation
+# Remaining 20% (2000) for low priority
+
+# Production overrides (uncomment to customize):
+# workerCount: 3               # Reduce workers on Render free tier
+# dailyValidationBudget: 5000  # Lower quota for cost control

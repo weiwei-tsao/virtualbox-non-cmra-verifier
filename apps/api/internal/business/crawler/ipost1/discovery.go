@@ -83,19 +83,17 @@ func DiscoverAll(ctx context.Context, logFn func(string)) ([]model.Mailbox, erro
 	return allMailboxes, nil
 }
 
-// ProcessAndValidate discovers all iPost1 locations and validates them with Smarty.
-// This is similar to ATMB's ScrapeAndUpsert but adapted for iPost1's data structure.
-// Uses batch validation to reduce API calls by up to 99%.
+// ProcessAndValidate discovers all iPost1 locations using aggressive scraping strategy.
+// Sets ValidationStatus="pending" for new/changed records - validation happens separately.
 func ProcessAndValidate(
 	ctx context.Context,
-	validator ValidationClient,
 	store MailboxStore,
 	runID string,
 	logFn func(string),
 ) (Stats, error) {
 	stats := Stats{}
 
-	// Discover all locations
+	// PHASE 1: Discover all locations
 	discovered, err := DiscoverAll(ctx, logFn)
 	if err != nil {
 		return stats, fmt.Errorf("discovery failed: %w", err)
@@ -107,24 +105,26 @@ func ProcessAndValidate(
 		return stats, fmt.Errorf("no locations discovered")
 	}
 
-	// Fetch existing mailboxes for deduplication
+	// PHASE 2: Pre-check which locations are new (aggressive scraping strategy)
 	existing, err := store.FetchAllMetadata(ctx)
 	if err != nil {
 		return stats, fmt.Errorf("failed to fetch existing mailboxes: %w", err)
 	}
 
-	var toSave []model.Mailbox
-	var toValidateIndices []int // Track indices that need validation
-	const batchSize = 20        // Write every 20 items
+	// Build map of discovered locations by link for quick lookup
+	discoveredMap := make(map[string]model.Mailbox)
+	for _, mb := range discovered {
+		discoveredMap[mb.Link] = mb
+	}
 
-	for i, mb := range discovered {
-		select {
-		case <-ctx.Done():
-			return stats, ctx.Err()
-		default:
-		}
+	// Track which links to process (new or changed)
+	var toProcess []model.Mailbox
+	seenLinks := make(map[string]bool)
 
-		// Clean address data (remove HTML remnants from scraper)
+	for _, mb := range discovered {
+		seenLinks[mb.Link] = true
+
+		// Clean address data
 		mb.AddressRaw = util.CleanAddress(mb.AddressRaw)
 		mb.Link = util.CleanLink(mb.Link)
 
@@ -132,54 +132,67 @@ func ProcessAndValidate(
 		mb.CrawlRunID = runID
 		mb.Active = true
 		mb.Source = "iPost1"
-
-		// Generate unique hash for deduplication
 		mb.DataHash = hashMailbox(mb)
+
+		// Set validation status to "pending" - validation happens separately
+		mb.ValidationStatus = "pending"
+		mb.ValidationPriority = "high" // New addresses are high priority
 
 		// Check if already exists with same data
 		if prev, ok := existing[mb.Link]; ok {
 			if prev.DataHash == mb.DataHash && prev.CMRA != "" {
+				// Skip - already validated and unchanged
 				stats.Skipped++
 				continue
 			}
 			// Preserve ID for updates
 			mb.ID = prev.ID
+
+			// If data unchanged but CMRA exists, preserve validation data
+			if prev.DataHash == mb.DataHash {
+				mb.ValidationStatus = prev.ValidationStatus
+				mb.ValidationPriority = prev.ValidationPriority
+				mb.CMRA = prev.CMRA
+				mb.RDI = prev.RDI
+				mb.LastValidatedAt = prev.LastValidatedAt
+			}
 		}
 
-		// Track if validation needed
-		needsValidation := mb.CMRA == "" || mb.RDI == ""
+		toProcess = append(toProcess, mb)
+		stats.Updated++
+	}
+
+	if logFn != nil {
+		logFn(fmt.Sprintf("PreCheck: new/changed=%d, skipped=%d", len(toProcess), stats.Skipped))
+	}
+
+	// PHASE 3: Write new/changed records to DB
+	const batchSize = 20
+	var toSave []model.Mailbox
+
+	for i, mb := range toProcess {
+		select {
+		case <-ctx.Done():
+			return stats, ctx.Err()
+		default:
+		}
 
 		toSave = append(toSave, mb)
-		if needsValidation && validator != nil {
-			toValidateIndices = append(toValidateIndices, len(toSave)-1)
-		}
-		stats.Updated++
 
-		// Incremental write with batch validation
+		// Incremental write
 		if len(toSave) >= batchSize {
-			// Batch validate before writing
-			if len(toValidateIndices) > 0 && validator != nil {
-				toSave, stats = batchValidateSubset(ctx, validator, toSave, toValidateIndices, stats, logFn)
-				toValidateIndices = toValidateIndices[:0]
-			}
-
 			if err := store.BatchUpsert(ctx, toSave); err != nil {
 				return stats, fmt.Errorf("batch upsert failed: %w", err)
 			}
 			if logFn != nil {
-				logFn(fmt.Sprintf("wrote %d items to DB (%d/%d processed)", len(toSave), i+1, stats.Found))
+				logFn(fmt.Sprintf("wrote %d items to DB (%d/%d processed)", len(toSave), i+1, len(toProcess)))
 			}
 			toSave = toSave[:0]
 		}
 	}
 
-	// Final write with batch validation
+	// Final write
 	if len(toSave) > 0 {
-		// Batch validate remaining items
-		if len(toValidateIndices) > 0 && validator != nil {
-			toSave, stats = batchValidateSubset(ctx, validator, toSave, toValidateIndices, stats, logFn)
-		}
-
 		if err := store.BatchUpsert(ctx, toSave); err != nil {
 			return stats, fmt.Errorf("final batch upsert failed: %w", err)
 		}
@@ -188,50 +201,24 @@ func ProcessAndValidate(
 		}
 	}
 
-	return stats, nil
-}
-
-// batchValidateSubset validates a subset of mailboxes by their indices using batch API.
-func batchValidateSubset(
-	ctx context.Context,
-	validator ValidationClient,
-	mailboxes []model.Mailbox,
-	indices []int,
-	stats Stats,
-	logFn func(string),
-) ([]model.Mailbox, Stats) {
-	if len(indices) == 0 {
-		return mailboxes, stats
+	// PHASE 4: Mark-and-sweep - soft delete records no longer at source
+	var deletedIDs []string
+	for link, prev := range existing {
+		if prev.Source == "iPost1" && !seenLinks[link] {
+			deletedIDs = append(deletedIDs, prev.ID)
+		}
 	}
 
-	// Extract subset to validate
-	subset := make([]model.Mailbox, len(indices))
-	for i, idx := range indices {
-		subset[i] = mailboxes[idx]
-	}
-
-	// Batch validate
-	validated, err := validator.ValidateMailboxBatch(ctx, subset)
-	if err != nil {
-		// On error, count all as failed
-		stats.Failed += len(indices)
+	if len(deletedIDs) > 0 {
+		if err := store.BulkSetActive(ctx, deletedIDs, false); err != nil {
+			return stats, fmt.Errorf("bulk set active: %w", err)
+		}
 		if logFn != nil {
-			logFn(fmt.Sprintf("batch validation failed for %d items: %v", len(indices), err))
-		}
-		return mailboxes, stats
-	}
-
-	// Merge results back
-	for i, idx := range indices {
-		mailboxes[idx] = validated[i]
-		if validated[i].CMRA != "" {
-			stats.Validated++
-		} else {
-			stats.Failed++
+			logFn(fmt.Sprintf("marked %d records as inactive (deleted from source)", len(deletedIDs)))
 		}
 	}
 
-	return mailboxes, stats
+	return stats, nil
 }
 
 // Stats tracks the progress of iPost1 crawl.
@@ -254,6 +241,7 @@ type MailboxStore interface {
 	FetchAllMap(ctx context.Context) (map[string]model.Mailbox, error)
 	FetchAllMetadata(ctx context.Context) (map[string]model.Mailbox, error)
 	BatchUpsert(ctx context.Context, mailboxes []model.Mailbox) error
+	BulkSetActive(ctx context.Context, ids []string, active bool) error
 }
 
 // hashMailbox creates a unique hash for deduplication.

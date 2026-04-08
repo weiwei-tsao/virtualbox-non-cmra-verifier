@@ -10,26 +10,42 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/crawler"
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/validation"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/repository"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
 )
 
 // Router wires HTTP handlers.
 type Router struct {
-	mailboxes *repository.MailboxRepository
-	runs      *repository.RunRepository
-	stats     *repository.StatsRepository
-	crawler   *crawler.Service
-	origins   string
+	mailboxes       *repository.MailboxRepository
+	runs            *repository.RunRepository
+	validationRuns  *repository.ValidationRunRepository
+	stats           *repository.StatsRepository
+	crawler         *crawler.Service
+	validationSvc   *validation.ValidationService
+	revalidationChk *validation.RevalidationChecker
+	origins         string
 }
 
-func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepository, stats *repository.StatsRepository, crawlerSvc *crawler.Service, allowedOrigins string) *gin.Engine {
+func NewRouter(
+	mailboxes *repository.MailboxRepository,
+	runs *repository.RunRepository,
+	validationRuns *repository.ValidationRunRepository,
+	stats *repository.StatsRepository,
+	crawlerSvc *crawler.Service,
+	validationSvc *validation.ValidationService,
+	revalidationChk *validation.RevalidationChecker,
+	allowedOrigins string,
+) *gin.Engine {
 	r := &Router{
-		mailboxes: mailboxes,
-		runs:      runs,
-		stats:     stats,
-		crawler:   crawlerSvc,
-		origins:   allowedOrigins,
+		mailboxes:       mailboxes,
+		runs:            runs,
+		validationRuns:  validationRuns,
+		stats:           stats,
+		crawler:         crawlerSvc,
+		validationSvc:   validationSvc,
+		revalidationChk: revalidationChk,
+		origins:         allowedOrigins,
 	}
 
 	router := gin.New()
@@ -53,6 +69,13 @@ func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepo
 
 		// iPost1 specific endpoints
 		api.POST("/crawl/ipost1/run", r.startIPost1Crawl)
+
+		// Validation endpoints
+		api.POST("/validation/run", r.runValidation)
+		api.GET("/validation/stats", r.getValidationStats)
+		api.GET("/validation/runs", r.listValidationRuns)
+		api.GET("/validation/runs/:runId", r.getValidationRun)
+		api.POST("/validation/revalidation/check", r.checkRevalidation)
 	}
 
 	return router
@@ -338,4 +361,77 @@ func (r *Router) startIPost1Crawl(c *gin.Context) {
 		"runId":   runID,
 		"message": "iPost1 crawl started. Check status with GET /api/crawl/status?runId=" + runID,
 	})
+}
+
+// Validation endpoints
+
+func (r *Router) runValidation(c *gin.Context) {
+	if r.validationSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Validation service not available"})
+		return
+	}
+
+	stats, err := r.validationSvc.ProcessPendingValidations(c.Request.Context(), "manual")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Validation completed",
+		"stats":   stats,
+	})
+}
+
+func (r *Router) getValidationStats(c *gin.Context) {
+	stats, err := r.mailboxes.GetValidationStats(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+func (r *Router) checkRevalidation(c *gin.Context) {
+	if r.revalidationChk == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Revalidation checker not available"})
+		return
+	}
+
+	stats, err := r.revalidationChk.CheckRevalidationNeeded(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Revalidation check completed",
+		"stats":   stats,
+	})
+}
+
+func (r *Router) listValidationRuns(c *gin.Context) {
+	runs, err := r.validationRuns.ListRuns(c.Request.Context(), 20)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": runs})
+}
+
+func (r *Router) getValidationRun(c *gin.Context) {
+	runID := c.Param("runId")
+	if runID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "runId is required"})
+		return
+	}
+
+	run, err := r.validationRuns.GetRun(c.Request.Context(), runID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, run)
 }
