@@ -26,7 +26,6 @@ export const Crawler: React.FC = () => {
   const { data: validationStats } = useQuery({
     queryKey: ['validationStats'],
     queryFn: api.getValidationStats,
-    refetchInterval: 10000, // Refresh every 10 seconds
   });
 
   const { data: validationRuns = [] } = useQuery({
