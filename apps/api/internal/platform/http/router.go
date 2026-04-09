@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"net/http"
@@ -371,15 +372,20 @@ func (r *Router) runValidation(c *gin.Context) {
 		return
 	}
 
-	stats, err := r.validationSvc.ProcessPendingValidations(c.Request.Context(), "manual")
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
+	// Use a detached background context so the validation isn't canceled if the HTTP request times out
+	bgCtx := context.Background()
+
+	go func() {
+		_, err := r.validationSvc.ProcessPendingValidations(bgCtx, "manual")
+		if err != nil {
+			// In a real system, you might want to log this error to your observability stack
+			fmt.Printf("Background validation failed: %v\n", err)
+		}
+	}()
 
 	c.JSON(http.StatusOK, gin.H{
-		"message": "Validation completed",
-		"stats":   stats,
+		"message": "Validation job started in the background. It will process all pending items.",
+		"stats":   nil, // Optional: keeping structure consistent
 	})
 }
 
