@@ -290,8 +290,10 @@ func (r *MailboxRepository) FetchByValidationStatus(ctx context.Context, status,
 		query = query.Where("validationPriority", "==", priority)
 	}
 
-	// Composite index (validationStatus, validationPriority, nextRetryAt) is enabled in Firestore
-	query = query.OrderBy("validationPriority", firestore.Asc).OrderBy("nextRetryAt", firestore.Asc)
+	// Removed OrderBy("nextRetryAt") because Firestore completely excludes documents 
+	// that do not have the OrderBy field from the result set. Since NextRetryAt is 
+	// omitempty, clean pending items lack this field and were being completely hidden!
+	// We also don't need to OrderBy validationPriority since we are often doing an exact match on it.
 
 	// Apply limit
 	if limit > 0 {
