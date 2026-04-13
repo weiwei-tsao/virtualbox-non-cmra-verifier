@@ -14,11 +14,14 @@ A full-stack application that scrapes, validates, and manages US virtual mailbox
 
 ### Features
 
-- **Multi-Source Scraping**: ATMB (~2,000 locations) and iPost1 (~4,000 locations)
-- **Address Validation**: Smarty API integration with batch processing (100 addresses/request)
-- **Dashboard**: Filter, search, and export mailbox data
-- **Analytics**: Charts showing RDI distribution, state breakdown, and source distribution
-- **Reprocessing**: Re-parse stored HTML without re-fetching (15x faster iteration)
+- **Multi-Source Scraping**: ATMB (~2,000 locations via goquery) and iPost1 (~4,000 locations via headless Chrome / Cloudflare bypass)
+- **Batch Address Validation**: Smarty API with 100 addresses/request, multi-credential load balancing and circuit breaker
+- **Async Validation Workers**: Background worker processes pending validations every 5 minutes; daily re-validation checker marks stale addresses (configurable via feature flags)
+- **Validation Lifecycle**: Per-address state machine — `pending → validated / failed / retry_scheduled / needs_revalidation / manual_review`
+- **Dashboard**: Filter by state, CMRA, RDI, source; CSV export with dynamic filenames
+- **Analytics**: Charts for RDI distribution, state breakdown, source distribution
+- **Reprocessing**: Re-parse stored HTML without re-fetching (~2 min vs ~30 min re-crawl)
+- **5-Level Config Cascade**: Code defaults → `config.yaml` → env vars → Firestore DB → per-job overrides
 
 ### Tech Stack
 
@@ -28,71 +31,161 @@ A full-stack application that scrapes, validates, and manages US virtual mailbox
 | Backend | Go 1.25 + Gin Framework |
 | Database | Firebase Firestore |
 | Validation | Smarty Street API |
-| Automation | chromedp (Cloudflare bypass) |
+| Browser Automation | chromedp (Cloudflare bypass for iPost1) |
 
 ### Quick Start
 
-#### Backend
+#### Option A — Docker (recommended)
+
+```bash
+# 1. Copy and fill in credentials
+cp .env.docker.example .env.docker
+
+# 2. Build and start
+docker compose --env-file .env.docker up --build
+
+# Frontend: http://localhost
+# API:      http://localhost:8080/healthz
+```
+
+See [docs/CONTAINERIZATION.md](docs/CONTAINERIZATION.md) for the full Docker guide.
+
+#### Option B — Local Development
+
+**Backend** (from `apps/api/`):
 
 ```bash
 cd apps/api
 
-# Create environment file
+# Create .env.local (auto-loaded by godotenv on startup)
 cat > .env.local <<'EOF'
 PORT=8080
 GIN_MODE=debug
 ALLOWED_ORIGINS=http://localhost:5173
 
-# Firebase
 FIREBASE_PROJECT_ID=your-project-id
 FIREBASE_CREDS_FILE=service-account.json
 
-# Smarty (set SMARTY_MOCK=true to skip real API calls)
+# Set SMARTY_MOCK=true to skip real API calls during development
 SMARTY_AUTH_ID=your-smarty-id
 SMARTY_AUTH_TOKEN=your-smarty-token
 SMARTY_MOCK=true
 
-# Crawler
 CRAWLER_CONCURRENCY=5
 EOF
 
-# Run server
-env $(cat .env.local | xargs) go run ./cmd/server
+go run ./cmd/server
 ```
 
-#### Frontend
+**Frontend** (from repo root, uses pnpm workspace):
+
+```bash
+pnpm install
+pnpm dev:web       # starts Vite dev server on :5173
+```
+
+Or directly from `apps/web/`:
 
 ```bash
 cd apps/web
-npm install
-npm run dev
+pnpm dev
+```
+
+**Run both together** (from repo root):
+
+```bash
+pnpm dev           # concurrently starts API (:8080) + web (:5173)
 ```
 
 ### API Endpoints
 
+**Health**
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/healthz` | Health check |
-| GET | `/api/mailboxes` | List with filters & pagination |
-| GET | `/api/mailboxes/export` | CSV export |
-| GET | `/api/stats` | Dashboard metrics |
-| POST | `/api/crawl/run` | Start ATMB crawl |
-| POST | `/api/crawl/ipost1/run` | Start iPost1 crawl |
-| POST | `/api/crawl/reprocess` | Re-parse from stored HTML |
-| GET | `/api/crawl/status?runId=X` | Job status |
-| GET | `/api/crawl/runs` | Job history |
+| GET | `/healthz` | Health check → `{"status":"ok"}` |
+
+**Mailboxes**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/mailboxes` | List with filters (`state`, `cmra`, `rdi`, `source`, `active`) and pagination |
+| GET | `/api/mailboxes/export` | Streaming CSV export with dynamic filename |
+| GET | `/api/stats` | Dashboard metrics (reads 1 singleton document) |
+| POST | `/api/stats/refresh` | Recompute and save aggregate stats |
+
+**Crawl Jobs**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/crawl/run` | Start ATMB crawl (body: `{"links":[...]}`) |
+| POST | `/api/crawl/ipost1/run` | Start iPost1 crawl (headless Chrome) |
+| POST | `/api/crawl/reprocess` | Re-parse from stored HTML (body: `{"onlyOutdated":true}`) |
+| GET | `/api/crawl/status?runId=X` | Poll job status |
+| GET | `/api/crawl/runs` | Job history (last 20) |
+| POST | `/api/crawl/runs/:runId/cancel` | Cancel a running job |
+
+**Validation**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/validation/run` | Trigger manual validation of pending addresses |
+| GET | `/api/validation/stats` | Validation status breakdown by state |
+| GET | `/api/validation/runs` | Validation run history (last 20) |
+| GET | `/api/validation/runs/:runId` | Single validation run detail |
+| POST | `/api/validation/revalidation/check` | Mark addresses needing re-validation |
+
+### Environment Variables
+
+**Required**
+
+| Variable | Description |
+|----------|-------------|
+| `FIREBASE_PROJECT_ID` | Firebase project ID |
+| `FIREBASE_CREDS_BASE64` | service-account.json as Base64 (production) |
+| `FIREBASE_CREDS_FILE` | Path to service-account.json (local dev) |
+| `SMARTY_AUTH_ID` | Smarty auth ID(s), comma-separated for multiple accounts |
+| `SMARTY_AUTH_TOKEN` | Smarty auth token(s), must match ID count |
+
+**Optional — Server**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PORT` | `8080` | HTTP listen port |
+| `GIN_MODE` | `release` | `debug` or `release` |
+| `ALLOWED_ORIGINS` | — | CORS allowed origins, comma-separated |
+| `SMARTY_MOCK` | `false` | Skip real API calls; returns CMRA=Y, RDI=Commercial |
+| `CRAWL_LINK_SEEDS` | — | ATMB seed URLs, comma-separated |
+| `CRAWLER_CONCURRENCY` | `5` | Concurrent ATMB worker count (Render free tier limit: 5) |
+| `USE_AGGRESSIVE_SCRAPING` | `true` | Enable mark-and-sweep deactivation |
+| `ENABLE_VALIDATION_WORKERS` | `false` | Run background validation every 5 minutes |
+| `ENABLE_REVALIDATION_CHECKER` | `false` | Daily check at 02:00 UTC for stale addresses |
+
+For the full crawler tuning variables (`CRAWLER_DAILY_VALIDATION_BUDGET`, `CRAWLER_RETRY_*`, etc.), see [docs/CONTAINERIZATION.md §8](docs/CONTAINERIZATION.md#8-环境变量完整参考).
+
+### Pre-Commit Checks
+
+```bash
+cd apps/api
+go build ./...   # verify all packages compile
+go vet ./...     # static analysis
+go test ./...    # run tests
+```
 
 ### Deployment
 
 | Service | Platform | Notes |
 |---------|----------|-------|
-| Frontend | Vercel | Set `VITE_API_URL` |
-| Backend | Render | Set env vars, build: `go build -o server cmd/server/main.go` |
-| Database | Firebase | Free tier: 50K reads/day |
+| Frontend | Vercel | Set `VITE_API_URL` to the backend public URL |
+| Backend | Render | Build: `cd apps/api && go build -o server ./cmd/server/main.go` |
+| Database | Firebase Firestore | Free tier: 50K reads / 20K writes per day |
 
 ### Documentation
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical documentation.
+| Document | Description |
+|----------|-------------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System architecture, data models, crawl workflows |
+| [docs/CONTAINERIZATION.md](docs/CONTAINERIZATION.md) | Docker setup, env var reference, troubleshooting |
 
 ---
 
@@ -100,15 +193,18 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical document
 
 ### 概述
 
-一个全栈应用，用于抓取、验证和管理美国虚拟邮箱地址。系统通过 Smarty API 验证地址，并将其分类为 CMRA（商业邮件接收机构）和 RDI（住宅配送指示器）。
+一个全栈应用，用于抓取、验证和管理美国虚拟邮箱地址。系统通过 Smarty API 验证地址，将其分类为 CMRA（商业邮件接收机构）和 RDI（住宅配送指示器）。
 
 ### 功能特性
 
-- **多源抓取**: ATMB (~2,000 个地点) 和 iPost1 (~4,000 个地点)
-- **地址验证**: Smarty API 集成，支持批量处理 (100 个地址/请求)
-- **管理面板**: 过滤、搜索和导出邮箱数据
-- **数据分析**: RDI 分布、州分布和数据源分布图表
-- **重处理**: 从存储的 HTML 重新解析，无需重新抓取 (迭代速度提升 15 倍)
+- **多源抓取**：ATMB（~2,000 个地点，goquery 静态解析）和 iPost1（~4,000 个地点，headless Chrome 绕过 Cloudflare）
+- **批量地址验证**：Smarty API，每次请求 100 个地址；支持多账号负载均衡和熔断器
+- **异步验证 Worker**：后台 Worker 每 5 分钟处理 pending 地址；每日重验检查器标记过期地址（通过 feature flag 控制）
+- **验证生命周期**：每个地址有独立状态机 —— `pending → validated / failed / retry_scheduled / needs_revalidation / manual_review`
+- **管理面板**：按州、CMRA、RDI、数据源过滤；CSV 动态文件名导出
+- **数据分析**：RDI 分布、州分布、数据源分布图表
+- **重处理**：从存储的 HTML 重新解析，无需重新抓取（约 2 分钟 vs 重爬 30 分钟）
+- **5 级配置层叠**：代码默认值 → `config.yaml` → 环境变量 → Firestore DB → 运行时 per-job 参数
 
 ### 技术栈
 
@@ -118,86 +214,161 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for detailed technical document
 | 后端 | Go 1.25 + Gin 框架 |
 | 数据库 | Firebase Firestore |
 | 验证 | Smarty Street API |
-| 自动化 | chromedp (绕过 Cloudflare) |
+| 浏览器自动化 | chromedp（绕过 Cloudflare，用于 iPost1）|
 
 ### 快速开始
 
-#### 后端
+#### 方式 A — Docker（推荐）
+
+```bash
+# 1. 复制并填写凭证
+cp .env.docker.example .env.docker
+
+# 2. 构建并启动
+docker compose --env-file .env.docker up --build
+
+# 前端：http://localhost
+# API： http://localhost:8080/healthz
+```
+
+完整 Docker 说明见 [docs/CONTAINERIZATION.md](docs/CONTAINERIZATION.md)。
+
+#### 方式 B — 本地开发
+
+**后端**（在 `apps/api/` 目录下）：
 
 ```bash
 cd apps/api
 
-# 创建环境配置文件
+# 创建 .env.local（godotenv 在启动时自动加载）
 cat > .env.local <<'EOF'
 PORT=8080
 GIN_MODE=debug
 ALLOWED_ORIGINS=http://localhost:5173
 
-# Firebase 配置
 FIREBASE_PROJECT_ID=your-project-id
 FIREBASE_CREDS_FILE=service-account.json
 
-# Smarty 配置 (设置 SMARTY_MOCK=true 跳过真实 API 调用)
+# 本地开发建议开启 mock 模式，跳过真实 API 调用
 SMARTY_AUTH_ID=your-smarty-id
 SMARTY_AUTH_TOKEN=your-smarty-token
 SMARTY_MOCK=true
 
-# 爬虫配置
 CRAWLER_CONCURRENCY=5
 EOF
 
-# 启动服务
-env $(cat .env.local | xargs) go run ./cmd/server
+go run ./cmd/server
 ```
 
-#### 前端
+**前端**（从仓库根目录，使用 pnpm workspace）：
+
+```bash
+pnpm install
+pnpm dev:web       # 启动 Vite 开发服务器，端口 5173
+```
+
+或直接在 `apps/web/` 目录：
 
 ```bash
 cd apps/web
-npm install
-npm run dev
+pnpm dev
+```
+
+**同时启动前后端**（从仓库根目录）：
+
+```bash
+pnpm dev           # 并行启动 API (:8080) + web (:5173)
 ```
 
 ### API 端点
 
-| 方法 | 端点 | 描述 |
+**健康检查**
+
+| 方法 | 端点 | 说明 |
 |------|------|------|
-| GET | `/healthz` | 健康检查 |
-| GET | `/api/mailboxes` | 列表查询（支持过滤和分页） |
-| GET | `/api/mailboxes/export` | CSV 导出 |
-| GET | `/api/stats` | 仪表盘统计 |
-| POST | `/api/crawl/run` | 启动 ATMB 爬虫 |
-| POST | `/api/crawl/ipost1/run` | 启动 iPost1 爬虫 |
-| POST | `/api/crawl/reprocess` | 从存储的 HTML 重新解析 |
-| GET | `/api/crawl/status?runId=X` | 任务状态 |
-| GET | `/api/crawl/runs` | 任务历史 |
+| GET | `/healthz` | 健康检查 → `{"status":"ok"}` |
+
+**邮箱数据**
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/api/mailboxes` | 列表查询（支持 `state`、`cmra`、`rdi`、`source`、`active` 过滤和分页）|
+| GET | `/api/mailboxes/export` | 流式 CSV 导出，动态文件名 |
+| GET | `/api/stats` | 仪表盘统计（读取 1 个单例文档）|
+| POST | `/api/stats/refresh` | 重新计算并保存统计数据 |
+
+**爬取任务**
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/crawl/run` | 启动 ATMB 爬虫（body: `{"links":[...]}`）|
+| POST | `/api/crawl/ipost1/run` | 启动 iPost1 爬虫（使用 headless Chrome）|
+| POST | `/api/crawl/reprocess` | 从存储的 HTML 重新解析（body: `{"onlyOutdated":true}`）|
+| GET | `/api/crawl/status?runId=X` | 轮询任务状态 |
+| GET | `/api/crawl/runs` | 任务历史（最近 20 条）|
+| POST | `/api/crawl/runs/:runId/cancel` | 取消正在运行的任务 |
+
+**验证**
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| POST | `/api/validation/run` | 手动触发 pending 地址验证 |
+| GET | `/api/validation/stats` | 验证状态分布统计 |
+| GET | `/api/validation/runs` | 验证任务历史（最近 20 条）|
+| GET | `/api/validation/runs/:runId` | 单条验证任务详情 |
+| POST | `/api/validation/revalidation/check` | 标记需要重验的地址 |
+
+### 环境变量
+
+**必需**
+
+| 变量 | 说明 |
+|------|------|
+| `FIREBASE_PROJECT_ID` | Firebase 项目 ID |
+| `FIREBASE_CREDS_BASE64` | service-account.json 的 Base64 编码（生产环境）|
+| `FIREBASE_CREDS_FILE` | service-account.json 文件路径（本地开发）|
+| `SMARTY_AUTH_ID` | Smarty 认证 ID，多账号用逗号分隔 |
+| `SMARTY_AUTH_TOKEN` | Smarty 认证令牌，数量必须与 ID 一致 |
+
+**可选 — 服务器**
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PORT` | `8080` | HTTP 监听端口 |
+| `GIN_MODE` | `release` | `debug` 或 `release` |
+| `ALLOWED_ORIGINS` | — | CORS 允许来源，逗号分隔 |
+| `SMARTY_MOCK` | `false` | 跳过真实 API，返回 CMRA=Y、RDI=Commercial |
+| `CRAWL_LINK_SEEDS` | — | ATMB 种子 URL，逗号分隔 |
+| `CRAWLER_CONCURRENCY` | `5` | ATMB 并发 worker 数（Render 免费版限制为 5）|
+| `USE_AGGRESSIVE_SCRAPING` | `true` | 启用标记清除（mark-and-sweep）下架策略 |
+| `ENABLE_VALIDATION_WORKERS` | `false` | 每 5 分钟自动验证 pending 地址 |
+| `ENABLE_REVALIDATION_CHECKER` | `false` | 每天 02:00 UTC 检查并标记过期地址 |
+
+爬虫精细调参变量（`CRAWLER_DAILY_VALIDATION_BUDGET`、`CRAWLER_RETRY_*` 等）请参阅 [docs/CONTAINERIZATION.md §8](docs/CONTAINERIZATION.md#8-环境变量完整参考)。
+
+### 提交前检查
+
+```bash
+cd apps/api
+go build ./...   # 验证所有包可以编译
+go vet ./...     # 静态分析
+go test ./...    # 运行测试
+```
 
 ### 部署
 
 | 服务 | 平台 | 说明 |
 |------|------|------|
-| 前端 | Vercel | 设置 `VITE_API_URL` 环境变量 |
-| 后端 | Render | 设置环境变量，构建命令: `go build -o server cmd/server/main.go` |
-| 数据库 | Firebase | 免费额度: 50K 读取/天 |
-
-### 环境变量说明
-
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `PORT` | 服务端口 | `8080` |
-| `GIN_MODE` | Gin 模式 (debug/release) | `debug` |
-| `ALLOWED_ORIGINS` | CORS 允许的来源 | `http://localhost:5173` |
-| `FIREBASE_PROJECT_ID` | Firebase 项目 ID | `your-project-id` |
-| `FIREBASE_CREDS_FILE` | 本地凭证文件路径 | `service-account.json` |
-| `FIREBASE_CREDS_BASE64` | 线上凭证 (Base64 编码) | - |
-| `SMARTY_AUTH_ID` | Smarty 认证 ID (多个用逗号分隔) | `id1,id2` |
-| `SMARTY_AUTH_TOKEN` | Smarty 认证令牌 (多个用逗号分隔) | `token1,token2` |
-| `SMARTY_MOCK` | 是否使用模拟模式 | `true` |
-| `CRAWLER_CONCURRENCY` | 爬虫并发数 (Render 免费版建议 5) | `5` |
+| 前端 | Vercel | 设置 `VITE_API_URL` 为后端公网地址 |
+| 后端 | Render | 构建命令：`cd apps/api && go build -o server ./cmd/server/main.go` |
+| 数据库 | Firebase Firestore | 免费额度：50K 读取 / 20K 写入每天 |
 
 ### 文档
 
-详细技术文档请参阅 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)。
+| 文档 | 内容 |
+|------|------|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构、数据模型、爬取流程 |
+| [docs/CONTAINERIZATION.md](docs/CONTAINERIZATION.md) | Docker 配置、完整环境变量参考、故障排查 |
 
 ---
 
