@@ -2,7 +2,9 @@ package validation
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
@@ -43,6 +45,8 @@ type ValidationService struct {
 	itemsSample       []model.ValidationItem
 	errorsSample      []model.ErrorSample
 	maxSampleSize     int
+	mu                sync.Mutex
+	isRunning         bool
 }
 
 // NewValidationService creates a new validation service.
@@ -107,6 +111,20 @@ type ValidationStats struct {
 //  - Medium: 30% of daily budget
 //  - Low: 20% of daily budget
 func (s *ValidationService) ProcessPendingValidations(ctx context.Context, triggerType string) (ValidationStats, error) {
+	s.mu.Lock()
+	if s.isRunning {
+		s.mu.Unlock()
+		return ValidationStats{}, errors.New("a validation run is already in progress")
+	}
+	s.isRunning = true
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		s.isRunning = false
+		s.mu.Unlock()
+	}()
+
 	stats := ValidationStats{}
 
 	// Default trigger type if not provided

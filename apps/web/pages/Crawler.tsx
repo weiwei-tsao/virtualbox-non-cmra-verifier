@@ -23,12 +23,6 @@ export const Crawler: React.FC = () => {
     },
   });
 
-  const { data: validationStats } = useQuery({
-    queryKey: ['validationStats'],
-    queryFn: api.getValidationStats,
-    refetchInterval: 10000, // Refresh every 10 seconds
-  });
-
   const { data: validationRuns = [] } = useQuery({
     queryKey: ['validationRuns'],
     queryFn: api.getValidationRuns,
@@ -36,6 +30,14 @@ export const Crawler: React.FC = () => {
       const hasRunning = query.state.data?.some((r) => r.status === 'running');
       return hasRunning ? 5000 : false;
     },
+  });
+
+  const hasRunningValidation = validationRuns.some((r) => r.status === 'running');
+
+  const { data: validationStats } = useQuery({
+    queryKey: ['validationStats'],
+    queryFn: api.getValidationStats,
+    refetchInterval: hasRunningValidation ? 5000 : false,
   });
 
   const cancelMutation = useMutation({
@@ -77,6 +79,7 @@ export const Crawler: React.FC = () => {
       const result = await api.triggerValidation();
       alert(result.message || "Validation started successfully");
       queryClient.invalidateQueries({ queryKey: ['validationStats'] });
+      queryClient.invalidateQueries({ queryKey: ['validationRuns'] });
     } catch (err) {
       console.error(err);
       alert("Failed to start validation. Check console for details.");
