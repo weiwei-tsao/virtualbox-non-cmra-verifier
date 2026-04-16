@@ -176,7 +176,7 @@ go test ./...    # run tests
 
 | Service | Platform | Notes |
 |---------|----------|-------|
-| Frontend | Vercel | Set `VITE_API_URL` to the backend public URL |
+| Frontend | Vercel | Set `VITE_API_BASE_URL` to the backend public URL |
 | Backend | Render | Build: `cd apps/api && go build -o server ./cmd/server/main.go` |
 | Database | Firebase Firestore | Free tier: 50K reads / 20K writes per day |
 
@@ -359,7 +359,7 @@ go test ./...    # 运行测试
 
 | 服务 | 平台 | 说明 |
 |------|------|------|
-| 前端 | Vercel | 设置 `VITE_API_URL` 为后端公网地址 |
+| 前端 | Vercel | 设置 `VITE_API_BASE_URL` 为后端公网地址 |
 | 后端 | Render | 构建命令：`cd apps/api && go build -o server ./cmd/server/main.go` |
 | 数据库 | Firebase Firestore | 免费额度：50K 读取 / 20K 写入每天 |
 
