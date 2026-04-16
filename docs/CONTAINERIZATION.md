@@ -226,10 +226,11 @@ RUN pnpm install --frozen-lockfile --filter=us-virtual-address-verifier
 # 复制 web app 全部源码
 COPY apps/web/ ./apps/web/
 
-# VITE_API_URL 是构建时变量，Vite 会将其打包进 JS bundle
+# VITE_API_BASE_URL 是构建时变量，Vite 会将其打包进 JS bundle
+# 变量名来自 apps/web/services/api.ts:3 和 apps/web/hooks/useCSVExport.ts:4
 # 值必须是浏览器可访问的地址（见第 11 节说明）
-ARG VITE_API_URL
-ENV VITE_API_URL=$VITE_API_URL
+ARG VITE_API_BASE_URL
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
 RUN pnpm --filter us-virtual-address-verifier build
 
@@ -330,7 +331,8 @@ services:
       args:
         # 浏览器通过宿主机端口映射访问 API（localhost:8080）
         # 不是容器间的 http://api:8080（浏览器无法解析）
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:8080}
+        # 变量名来自 apps/web/services/api.ts:3（VITE_API_BASE_URL，非 VITE_API_URL）
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
     ports:
       - "80:80"
     depends_on:
@@ -446,7 +448,8 @@ SMARTY_MOCK=false
 
 # ── 前端 API 地址 ─────────────────────────────────────────
 # 浏览器访问地址（通过宿主机端口映射）
-VITE_API_URL=http://localhost:8080
+# 变量名来自 apps/web/services/api.ts:3
+VITE_API_BASE_URL=http://localhost:8080
 
 # ── 可选功能 ──────────────────────────────────────────────
 ENABLE_VALIDATION_WORKERS=false
@@ -538,9 +541,9 @@ docker-clean: ## 清理所有容器、镜像和构建缓存
 
 ## 11. 生产注意事项
 
-### VITE_API_URL 的正确设置
+### VITE_API_BASE_URL 的正确设置
 
-`VITE_API_URL` 是**构建时**变量，Vite 在编译时将其替换进 JS bundle。它的值必须是**浏览器**能访问的地址，而非容器间通信地址：
+`VITE_API_BASE_URL` 是**构建时**变量（名称来自 [apps/web/services/api.ts:3](../apps/web/services/api.ts)），Vite 在编译时将其替换进 JS bundle。它的值必须是**浏览器**能访问的地址，而非容器间通信地址：
 
 | 场景 | 正确值 | 错误值 |
 |------|--------|--------|
