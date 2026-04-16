@@ -18,6 +18,7 @@ dist-ssr
 .env.production.local
 .env.*.local
 !.env.example
+.env.docker
 
 # Firebase service account
 apps/api/service-account.json

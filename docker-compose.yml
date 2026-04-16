@@ -1,0 +1,70 @@
+# docker-compose.yml
+# Run with: docker compose --env-file .env.docker up --build
+# See docs/CONTAINERIZATION.md for the full setup guide.
+
+services:
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Go API backend
+  # ───────────────────────────────────────────────────────────────────────────
+  api:
+    build:
+      context: .                          # repo root; Dockerfile copies from apps/api/
+      dockerfile: apps/api/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      PORT: "8080"
+      GIN_MODE: release
+      # Browser requests arrive with Origin: http://localhost (Nginx on port 80, no port suffix)
+      ALLOWED_ORIGINS: "http://localhost"
+
+      # Required: Chromium in Docker cannot use the kernel SUID sandbox.
+      # Injects --no-sandbox and --disable-dev-shm-usage via ipost1/client.go.
+      CHROME_NO_SANDBOX: "true"
+
+      # Required at startup: main.go calls firestoreclient.Ping() with a 5s timeout.
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_CREDS_BASE64: ${FIREBASE_CREDS_BASE64}
+
+      # Smarty API credentials (SMARTY_MOCK=true skips real API calls)
+      SMARTY_AUTH_ID: ${SMARTY_AUTH_ID}
+      SMARTY_AUTH_TOKEN: ${SMARTY_AUTH_TOKEN}
+      SMARTY_MOCK: ${SMARTY_MOCK:-false}
+
+      # Crawler settings
+      CRAWLER_CONCURRENCY: "5"
+      USE_AGGRESSIVE_SCRAPING: "true"
+
+      # Background workers — disabled by default, enable per docs/CONTAINERIZATION.md §8
+      ENABLE_VALIDATION_WORKERS: ${ENABLE_VALIDATION_WORKERS:-false}
+      ENABLE_REVALIDATION_CHECKER: ${ENABLE_REVALIDATION_CHECKER:-false}
+
+    restart: unless-stopped
+    healthcheck:
+      # Endpoint registered at router.go:55 — GET /healthz → {"status":"ok"}
+      # wget ships with BusyBox on Alpine; curl is not installed.
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s    # Firestore Ping has a 5s timeout; leave headroom for startup
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # React frontend (Nginx SPA)
+  # ───────────────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        # Build-time variable baked into the JS bundle by Vite.
+        # Name comes from apps/web/services/api.ts:3 — VITE_API_BASE_URL.
+        # Must be browser-accessible: http://localhost:8080 reaches the API
+        # via the host port mapping above, not the container-internal network.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080}
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+    restart: unless-stopped

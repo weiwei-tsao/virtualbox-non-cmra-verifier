@@ -1,4 +1,5 @@
-.PHONY: help test-ipost1-py test-ipost1-go ipost1-setup
+.PHONY: help test-ipost1-py test-ipost1-go ipost1-setup \
+	docker-build docker-up docker-down docker-logs docker-rebuild-api docker-clean
 
 help: ## 显示帮助信息
 	@echo "可用命令:"
@@ -46,3 +47,24 @@ docs: ## 打开 iPost1 文档
 	@echo "  - 实现方案: docs/ipost1_scraper_analysis.md"
 	@echo "  - 快速开始: docs/ipost1_README.md"
 	@echo "  - 项目 PRD: docs/US_VirtualBox_Non-CMRA_Verification_prd_en.md"
+
+# ── Docker 命令 ──────────────────────────────────────────────────────────────
+
+docker-build: ## 构建所有 Docker 镜像（需要 .env.docker）
+	docker compose --env-file .env.docker build
+
+docker-up: ## 构建并后台启动所有容器
+	docker compose --env-file .env.docker up -d --build
+
+docker-down: ## 停止并删除容器（保留镜像）
+	docker compose down
+
+docker-logs: ## 实时查看 API 容器日志
+	docker compose logs -f api
+
+docker-rebuild-api: ## 仅重新构建并重启 API 容器（代码改动后使用）
+	docker compose --env-file .env.docker up -d --build api
+
+docker-clean: ## 删除所有容器、镜像及构建缓存
+	docker compose down --rmi local --volumes
+	docker builder prune -f
