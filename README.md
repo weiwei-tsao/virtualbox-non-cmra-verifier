@@ -39,10 +39,10 @@ A full-stack application that scrapes, validates, and manages US virtual mailbox
 
 ```bash
 # 1. Copy and fill in credentials
-cp .env.docker.example .env.docker
+cp .env.docker.example .env
 
 # 2. Build and start
-docker compose --env-file .env.docker up --build
+docker compose up --build
 
 # Frontend: http://localhost
 # API:      http://localhost:8080/healthz
@@ -52,49 +52,33 @@ See [docs/CONTAINERIZATION.md](docs/CONTAINERIZATION.md) for the full Docker gui
 
 #### Option B — Local Development
 
+The quickest way is the included `start.sh` (or `make start`), which auto-creates `apps/api/.env.local` if missing, installs dependencies, and starts both services concurrently:
+
+```bash
+./start.sh
+# or
+make start
+
+# API:      http://localhost:8080
+# Frontend: http://localhost:5173
+# Press Ctrl+C to stop both
+```
+
+To start services individually:
+
 **Backend** (from `apps/api/`):
 
 ```bash
 cd apps/api
-
-# Create .env.local (auto-loaded by godotenv on startup)
-cat > .env.local <<'EOF'
-PORT=8080
-GIN_MODE=debug
-ALLOWED_ORIGINS=http://localhost:5173
-
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CREDS_FILE=service-account.json
-
-# Set SMARTY_MOCK=true to skip real API calls during development
-SMARTY_AUTH_ID=your-smarty-id
-SMARTY_AUTH_TOKEN=your-smarty-token
-SMARTY_MOCK=true
-
-CRAWLER_CONCURRENCY=5
-EOF
-
+# Edit .env.local first (see apps/api/.env.local template created by start.sh)
 go run ./cmd/server
 ```
 
-**Frontend** (from repo root, uses pnpm workspace):
+**Frontend** (from repo root):
 
 ```bash
 pnpm install
-pnpm dev:web       # starts Vite dev server on :5173
-```
-
-Or directly from `apps/web/`:
-
-```bash
-cd apps/web
-pnpm dev
-```
-
-**Run both together** (from repo root):
-
-```bash
-pnpm dev           # concurrently starts API (:8080) + web (:5173)
+pnpm dev:web    # Vite dev server on :5173
 ```
 
 ### API Endpoints
@@ -222,10 +206,10 @@ go test ./...    # run tests
 
 ```bash
 # 1. 复制并填写凭证
-cp .env.docker.example .env.docker
+cp .env.docker.example .env
 
 # 2. 构建并启动
-docker compose --env-file .env.docker up --build
+docker compose up --build
 
 # 前端：http://localhost
 # API： http://localhost:8080/healthz
@@ -235,49 +219,33 @@ docker compose --env-file .env.docker up --build
 
 #### 方式 B — 本地开发
 
+最简单的方式是使用根目录的 `start.sh`（或 `make start`），会自动创建 `apps/api/.env.local`、安装依赖并并行启动两个服务：
+
+```bash
+./start.sh
+# 或
+make start
+
+# API：      http://localhost:8080
+# 前端：     http://localhost:5173
+# Ctrl+C 同时停止两个服务
+```
+
+单独启动：
+
 **后端**（在 `apps/api/` 目录下）：
 
 ```bash
 cd apps/api
-
-# 创建 .env.local（godotenv 在启动时自动加载）
-cat > .env.local <<'EOF'
-PORT=8080
-GIN_MODE=debug
-ALLOWED_ORIGINS=http://localhost:5173
-
-FIREBASE_PROJECT_ID=your-project-id
-FIREBASE_CREDS_FILE=service-account.json
-
-# 本地开发建议开启 mock 模式，跳过真实 API 调用
-SMARTY_AUTH_ID=your-smarty-id
-SMARTY_AUTH_TOKEN=your-smarty-token
-SMARTY_MOCK=true
-
-CRAWLER_CONCURRENCY=5
-EOF
-
+# 先编辑 .env.local（start.sh 会自动生成模板）
 go run ./cmd/server
 ```
 
-**前端**（从仓库根目录，使用 pnpm workspace）：
+**前端**（从仓库根目录）：
 
 ```bash
 pnpm install
-pnpm dev:web       # 启动 Vite 开发服务器，端口 5173
-```
-
-或直接在 `apps/web/` 目录：
-
-```bash
-cd apps/web
-pnpm dev
-```
-
-**同时启动前后端**（从仓库根目录）：
-
-```bash
-pnpm dev           # 并行启动 API (:8080) + web (:5173)
+pnpm dev:web    # Vite 开发服务器，端口 5173
 ```
 
 ### API 端点
