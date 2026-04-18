@@ -1,5 +1,5 @@
 # docker-compose.yml
-# Run with: docker compose --env-file .env.docker up --build
+# Run with: docker compose up --build   (requires .env in repo root)
 # See docs/CONTAINERIZATION.md for the full setup guide.
 
 services:
