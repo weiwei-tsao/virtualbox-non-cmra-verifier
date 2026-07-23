@@ -160,27 +160,32 @@ func startBackgroundWorkers(ctx context.Context, validationSvc *validation.Valid
 		go func() {
 			log.Println("Background revalidation checker started (daily at 2 AM UTC)")
 
-		for {
-			now := time.Now().UTC()
-			next := time.Date(now.Year(), now.Month(), now.Day()+1, 2, 0, 0, 0, time.UTC)
-			if now.Hour() >= 2 {
-				// Already past 2 AM today, schedule for tomorrow
-				next = next.Add(24 * time.Hour)
-			}
+			for {
+				now := time.Now().UTC()
+				next := nextRevalidationCheck(now)
 
-			duration := next.Sub(now)
-			log.Printf("Next revalidation check scheduled for %s (in %s)", next.Format("2006-01-02 15:04:05 MST"), duration)
+				duration := next.Sub(now)
+				log.Printf("Next revalidation check scheduled for %s (in %s)", next.Format("2006-01-02 15:04:05 MST"), duration)
 
-			select {
-			case <-ctx.Done():
-				log.Println("Revalidation checker stopped")
-				return
-			case <-time.After(duration):
-				runRevalidationChecker(ctx, revalidationChk)
+				select {
+				case <-ctx.Done():
+					log.Println("Revalidation checker stopped")
+					return
+				case <-time.After(duration):
+					runRevalidationChecker(ctx, revalidationChk)
+				}
 			}
-		}
 		}()
 	}
+}
+
+func nextRevalidationCheck(now time.Time) time.Time {
+	now = now.UTC()
+	next := time.Date(now.Year(), now.Month(), now.Day(), 2, 0, 0, 0, time.UTC)
+	if !now.Before(next) {
+		next = next.Add(24 * time.Hour)
+	}
+	return next
 }
 
 // runValidationWorker processes pending validations and retries.
