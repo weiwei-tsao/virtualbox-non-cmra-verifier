@@ -32,11 +32,11 @@ type FailedItem struct {
 // BatchHandler handles batch validation with partial retry logic.
 // If a batch fails, it retries failed items individually to save successful validations.
 type BatchHandler struct {
-	validator      ValidationClient
-	backoffConfig  BackoffConfig
-	maxAttempts    int
-	onProgress     func(succeeded, failed int)
-	logFn          func(string)
+	validator     ValidationClient
+	backoffConfig BackoffConfig
+	maxAttempts   int
+	onProgress    func(succeeded, failed int)
+	logFn         func(string)
 }
 
 // NewBatchHandler creates a new batch validation handler.
@@ -77,15 +77,37 @@ func (h *BatchHandler) ValidateBatch(ctx context.Context, mailboxes []model.Mail
 	// PHASE 1: Try batch validation
 	validated, err := h.validator.ValidateMailboxBatch(ctx, mailboxes)
 	if err == nil {
-		// Batch succeeded - update all with validation timestamps
-		for i := range validated {
-			validated[i].LastValidatedAt = time.Now()
-			validated[i].ValidationStatus = "validated"
-			validated[i].LastValidationError = ""
+		retryIndividually := []model.Mailbox{}
+
+		for i, mb := range validated {
+			if i >= len(mailboxes) {
+				continue
+			}
+
+			if !hasFreshBatchValidation(mailboxes[i], mb) {
+				retryIndividually = append(retryIndividually, mailboxes[i])
+				continue
+			}
+
+			mb.LastValidatedAt = time.Now().UTC()
+			mb.ValidationStatus = "validated"
+			mb.LastValidationError = ""
+			result.Succeeded = append(result.Succeeded, mb)
 		}
-		result.Succeeded = validated
+		for i := len(validated); i < len(mailboxes); i++ {
+			retryIndividually = append(retryIndividually, mailboxes[i])
+		}
+
+		if len(retryIndividually) > 0 {
+			if h.logFn != nil {
+				h.logFn(fmt.Sprintf("batch validation returned no candidate for %d/%d items, retrying individually",
+					len(retryIndividually), len(mailboxes)))
+			}
+			h.validateIndividually(ctx, retryIndividually, &result)
+		}
+
 		if h.onProgress != nil {
-			h.onProgress(len(validated), 0)
+			h.onProgress(len(result.Succeeded), len(result.Failed))
 		}
 		return result
 	}
@@ -129,6 +151,23 @@ func (h *BatchHandler) ValidateBatch(ctx context.Context, mailboxes []model.Mail
 	}
 
 	// PHASE 3: Retry individually (transient or unknown error)
+	h.validateIndividually(ctx, mailboxes, &result)
+
+	if h.onProgress != nil {
+		h.onProgress(len(result.Succeeded), len(result.Failed))
+	}
+
+	return result
+}
+
+// hasFreshBatchValidation checks whether a batch result has evidence that Smarty
+// returned a candidate for this input row.
+func hasFreshBatchValidation(original, validated model.Mailbox) bool {
+	return !validated.LastValidatedAt.IsZero() &&
+		!validated.LastValidatedAt.Equal(original.LastValidatedAt)
+}
+
+func (h *BatchHandler) validateIndividually(ctx context.Context, mailboxes []model.Mailbox, result *BatchValidationResult) {
 	for _, mb := range mailboxes {
 		select {
 		case <-ctx.Done():
@@ -156,8 +195,7 @@ func (h *BatchHandler) ValidateBatch(ctx context.Context, mailboxes []model.Mail
 					ErrorType: errType,
 					Attempt:   0,
 				})
-				// Stop processing remaining items
-				break
+				return
 			}
 
 			result.Failed = append(result.Failed, FailedItem{
@@ -173,12 +211,6 @@ func (h *BatchHandler) ValidateBatch(ctx context.Context, mailboxes []model.Mail
 			result.Succeeded = append(result.Succeeded, validated)
 		}
 	}
-
-	if h.onProgress != nil {
-		h.onProgress(len(result.Succeeded), len(result.Failed))
-	}
-
-	return result
 }
 
 // validateWithRetry validates a single mailbox with exponential backoff retry.
