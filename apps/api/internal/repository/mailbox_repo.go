@@ -54,7 +54,7 @@ func (r *MailboxRepository) FetchAllMap(ctx context.Context) (map[string]model.M
 func (r *MailboxRepository) FetchAllMetadata(ctx context.Context) (map[string]model.Mailbox, error) {
 	// Select only the fields needed for scraper deduplication
 	iter := r.client.Collection("mailboxes").
-		Select("link", "dataHash", "cmra", "rdi", "id", "source").
+		Select("link", "dataHash", "cmra", "rdi", "id", "source", "active").
 		Documents(ctx)
 
 	result := make(map[string]model.Mailbox)

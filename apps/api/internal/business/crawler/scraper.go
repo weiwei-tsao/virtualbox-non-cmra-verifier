@@ -38,9 +38,10 @@ type ScrapeStats struct {
 
 // PreCheckResult contains the delta between provided links and existing database state.
 type PreCheckResult struct {
-	NewLinks      []string // Links to fetch (don't exist in DB)
-	ExistingLinks []string // Links already in DB (skip fetch)
-	DeletedIDs    []string // IDs of records no longer in source (mark inactive)
+	NewLinks       []string // Links to fetch (don't exist in DB)
+	ExistingLinks  []string // Links already in DB (skip fetch)
+	ReactivatedIDs []string // IDs of inactive records that reappeared in source
+	DeletedIDs     []string // IDs of records no longer in source (mark inactive)
 }
 
 // PreCheckLinks calculates which links need fetching vs which are already stored.
@@ -62,8 +63,11 @@ func PreCheckLinks(ctx context.Context, store MailboxStore, links []string, sour
 
 	// Categorize links
 	for _, link := range links {
-		if _, exists := existing[link]; exists {
+		if mb, exists := existing[link]; exists {
 			result.ExistingLinks = append(result.ExistingLinks, link)
+			if mb.Source == source && !mb.Active {
+				result.ReactivatedIDs = append(result.ReactivatedIDs, mb.ID)
+			}
 		} else {
 			result.NewLinks = append(result.NewLinks, link)
 		}
@@ -102,8 +106,8 @@ func ScrapeAndUpsert(
 	}
 
 	if logFn != nil {
-		logFn(fmt.Sprintf("PreCheck: new=%d, existing=%d, deleted=%d",
-			len(preCheck.NewLinks), len(preCheck.ExistingLinks), len(preCheck.DeletedIDs)))
+		logFn(fmt.Sprintf("PreCheck: new=%d, existing=%d, reactivated=%d, deleted=%d",
+			len(preCheck.NewLinks), len(preCheck.ExistingLinks), len(preCheck.ReactivatedIDs), len(preCheck.DeletedIDs)))
 	}
 
 	// Skip existing links (already validated and unchanged)
@@ -234,6 +238,18 @@ func ScrapeAndUpsert(
 	}
 
 	// PHASE 4: Mark-and-sweep - soft delete records no longer at source
+	if len(preCheck.ReactivatedIDs) > 0 {
+		if err := store.BulkSetActive(ctx, preCheck.ReactivatedIDs, true); err != nil {
+			if logFn != nil {
+				logFn(fmt.Sprintf("reactivation error: %v", err))
+			}
+			return stats, fmt.Errorf("bulk set active: %w", err)
+		}
+		if logFn != nil {
+			logFn(fmt.Sprintf("reactivated %d records that reappeared in source", len(preCheck.ReactivatedIDs)))
+		}
+	}
+
 	if len(preCheck.DeletedIDs) > 0 {
 		if err := store.BulkSetActive(ctx, preCheck.DeletedIDs, false); err != nil {
 			if logFn != nil {
