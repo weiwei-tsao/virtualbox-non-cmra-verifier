@@ -34,19 +34,19 @@ type ValidationRunRepository interface {
 
 // ValidationService orchestrates the validation process with quota management and retry logic.
 type ValidationService struct {
-	validator         ValidationClient
-	repository        MailboxRepository
-	runRepository     ValidationRunRepository
-	quotaManager      *QuotaManager
-	batchHandler      *BatchHandler
-	config            model.CrawlerConfig
-	logFn             func(string)
-	currentRunID      string // Track current run ID
-	itemsSample       []model.ValidationItem
-	errorsSample      []model.ErrorSample
-	maxSampleSize     int
-	mu                sync.Mutex
-	isRunning         bool
+	validator     ValidationClient
+	repository    MailboxRepository
+	runRepository ValidationRunRepository
+	quotaManager  *QuotaManager
+	batchHandler  *BatchHandler
+	config        model.CrawlerConfig
+	logFn         func(string)
+	currentRunID  string // Track current run ID
+	itemsSample   []model.ValidationItem
+	errorsSample  []model.ErrorSample
+	maxSampleSize int
+	mu            sync.Mutex
+	isRunning     bool
 }
 
 // NewValidationService creates a new validation service.
@@ -107,9 +107,9 @@ type ValidationStats struct {
 //  3. LOW priority (recently validated: <70 days)
 //
 // Quota allocation:
-//  - High: 50% of daily budget
-//  - Medium: 30% of daily budget
-//  - Low: 20% of daily budget
+//   - High: 50% of daily budget
+//   - Medium: 30% of daily budget
+//   - Low: 20% of daily budget
 func (s *ValidationService) ProcessPendingValidations(ctx context.Context, triggerType string) (ValidationStats, error) {
 	s.mu.Lock()
 	if s.isRunning {
@@ -376,10 +376,10 @@ func (s *ValidationService) handleFailedValidations(ctx context.Context, failed 
 			nextRetryAt = time.Time{} // Zero time means no retry
 
 		case item.ErrorType == ErrorQuotaExhausted:
-			// Quota exhausted - keep as pending for next run
-			status = "pending"
+			// Quota exhausted - pause until quota can recover
+			status = "retry_scheduled"
 			nextRetryAt = time.Now().Add(24 * time.Hour) // Try again tomorrow
-			attempts = mb.ValidationAttempts // Don't increment attempts
+			attempts = mb.ValidationAttempts             // Don't increment attempts
 
 		case attempts >= s.config.MaxRetryAttempts:
 			// Max retries exceeded - mark for manual review
