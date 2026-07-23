@@ -1,34 +1,52 @@
 package http
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/crawler"
+	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/business/validation"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/internal/repository"
 	"github.com/weiwei-tsao/virtualbox-verifier/apps/api/pkg/model"
 )
 
 // Router wires HTTP handlers.
 type Router struct {
-	mailboxes *repository.MailboxRepository
-	runs      *repository.RunRepository
-	stats     *repository.StatsRepository
-	crawler   *crawler.Service
-	origins   string
+	mailboxes       *repository.MailboxRepository
+	runs            *repository.RunRepository
+	validationRuns  *repository.ValidationRunRepository
+	stats           *repository.StatsRepository
+	crawler         *crawler.Service
+	validationSvc   *validation.ValidationService
+	revalidationChk *validation.RevalidationChecker
+	origins         string
 }
 
-func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepository, stats *repository.StatsRepository, crawlerSvc *crawler.Service, allowedOrigins string) *gin.Engine {
+func NewRouter(
+	mailboxes *repository.MailboxRepository,
+	runs *repository.RunRepository,
+	validationRuns *repository.ValidationRunRepository,
+	stats *repository.StatsRepository,
+	crawlerSvc *crawler.Service,
+	validationSvc *validation.ValidationService,
+	revalidationChk *validation.RevalidationChecker,
+	allowedOrigins string,
+) *gin.Engine {
 	r := &Router{
-		mailboxes: mailboxes,
-		runs:      runs,
-		stats:     stats,
-		crawler:   crawlerSvc,
-		origins:   allowedOrigins,
+		mailboxes:       mailboxes,
+		runs:            runs,
+		validationRuns:  validationRuns,
+		stats:           stats,
+		crawler:         crawlerSvc,
+		validationSvc:   validationSvc,
+		revalidationChk: revalidationChk,
+		origins:         allowedOrigins,
 	}
 
 	router := gin.New()
@@ -52,6 +70,13 @@ func NewRouter(mailboxes *repository.MailboxRepository, runs *repository.RunRepo
 
 		// iPost1 specific endpoints
 		api.POST("/crawl/ipost1/run", r.startIPost1Crawl)
+
+		// Validation endpoints
+		api.POST("/validation/run", r.runValidation)
+		api.GET("/validation/stats", r.getValidationStats)
+		api.GET("/validation/runs", r.listValidationRuns)
+		api.GET("/validation/runs/:runId", r.getValidationRun)
+		api.POST("/validation/revalidation/check", r.checkRevalidation)
 	}
 
 	return router
@@ -77,6 +102,7 @@ func (r *Router) corsMiddleware() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Origin", allowed)
 		c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization")
 		c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		c.Header("Access-Control-Expose-Headers", "Content-Disposition")
 		if c.Request.Method == http.MethodOptions {
 			c.Status(http.StatusNoContent)
 			c.Abort()
@@ -116,10 +142,34 @@ func (r *Router) listMailboxes(c *gin.Context) {
 	})
 }
 
-func (r *Router) exportMailboxes(c *gin.Context) {
-	c.Header("Content-Type", "text/csv")
-	c.Header("Content-Disposition", "attachment; filename=mailboxes.csv")
+// generateExportFilename creates a descriptive CSV filename based on active filters.
+// Format: mailbox-{filters}-{timestamp}.csv
+// If only default filters (active=true), returns: mailbox-{timestamp}.csv
+func generateExportFilename(query repository.MailboxQuery) string {
+	parts := []string{"mailbox"}
 
+	// Add filter segments in order: state, source, cmra, rdi
+	if query.State != "" {
+		parts = append(parts, query.State)
+	}
+	if query.Source != "" {
+		parts = append(parts, query.Source)
+	}
+	if query.CMRA != "" {
+		parts = append(parts, query.CMRA)
+	}
+	if query.RDI != "" {
+		parts = append(parts, query.RDI)
+	}
+
+	// Add timestamp in RFC3339 basic format (UTC)
+	timestamp := time.Now().UTC().Format("20060102T150405Z")
+	parts = append(parts, timestamp)
+
+	return strings.Join(parts, "-") + ".csv"
+}
+
+func (r *Router) exportMailboxes(c *gin.Context) {
 	// Parse query parameters for filtering
 	activePtr := func() *bool { v := true; return &v }() // default to active only
 	if activeParam := c.Query("active"); activeParam != "" {
@@ -134,6 +184,12 @@ func (r *Router) exportMailboxes(c *gin.Context) {
 		Source: c.Query("source"),
 		Active: activePtr,
 	}
+
+	// Generate dynamic filename based on filters
+	filename := generateExportFilename(query)
+
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 
 	writer := csv.NewWriter(c.Writer)
 	defer writer.Flush()
@@ -306,4 +362,82 @@ func (r *Router) startIPost1Crawl(c *gin.Context) {
 		"runId":   runID,
 		"message": "iPost1 crawl started. Check status with GET /api/crawl/status?runId=" + runID,
 	})
+}
+
+// Validation endpoints
+
+func (r *Router) runValidation(c *gin.Context) {
+	if r.validationSvc == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Validation service not available"})
+		return
+	}
+
+	// Use a detached background context so the validation isn't canceled if the HTTP request times out
+	bgCtx := context.Background()
+
+	go func() {
+		_, err := r.validationSvc.ProcessPendingValidations(bgCtx, "manual")
+		if err != nil {
+			// In a real system, you might want to log this error to your observability stack
+			fmt.Printf("Background validation failed: %v\n", err)
+		}
+	}()
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Validation job started in the background. It will process all pending items.",
+		"stats":   nil, // Optional: keeping structure consistent
+	})
+}
+
+func (r *Router) getValidationStats(c *gin.Context) {
+	stats, err := r.mailboxes.GetValidationStats(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, stats)
+}
+
+func (r *Router) checkRevalidation(c *gin.Context) {
+	if r.revalidationChk == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Revalidation checker not available"})
+		return
+	}
+
+	stats, err := r.revalidationChk.CheckRevalidationNeeded(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Revalidation check completed",
+		"stats":   stats,
+	})
+}
+
+func (r *Router) listValidationRuns(c *gin.Context) {
+	runs, err := r.validationRuns.ListRuns(c.Request.Context(), 20)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"items": runs})
+}
+
+func (r *Router) getValidationRun(c *gin.Context) {
+	runID := c.Param("runId")
+	if runID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "runId is required"})
+		return
+	}
+
+	run, err := r.validationRuns.GetRun(c.Request.Context(), runID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, run)
 }

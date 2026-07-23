@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -42,6 +43,16 @@ func NewClient() (*Client, error) {
 		chromedp.UserAgent("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
 		chromedp.WindowSize(1920, 1080),
 	)
+
+	// Docker containers cannot use the kernel SUID sandbox.
+	// Set CHROME_NO_SANDBOX=true in the container environment to disable it.
+	// Local macOS development should leave this unset.
+	if os.Getenv("CHROME_NO_SANDBOX") == "true" {
+		opts = append(opts,
+			chromedp.Flag("no-sandbox", true),
+			chromedp.Flag("disable-dev-shm-usage", true),
+		)
+	}
 
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 

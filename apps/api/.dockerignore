@@ -1,0 +1,17 @@
+# Credentials — never send to build daemon
+.env
+.env.local
+*.env.*
+service-account.json
+
+# Test fixtures (testdata/ may contain rawHTML samples)
+testdata/
+**/*_test.go
+
+# Compiled binary
+server
+
+# Not needed in build context
+.git
+*.md
+scripts/

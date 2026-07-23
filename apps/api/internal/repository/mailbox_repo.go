@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"cloud.google.com/go/firestore"
 	firestorepb "cloud.google.com/go/firestore/apiv1/firestorepb"
@@ -53,7 +54,7 @@ func (r *MailboxRepository) FetchAllMap(ctx context.Context) (map[string]model.M
 func (r *MailboxRepository) FetchAllMetadata(ctx context.Context) (map[string]model.Mailbox, error) {
 	// Select only the fields needed for scraper deduplication
 	iter := r.client.Collection("mailboxes").
-		Select("link", "dataHash", "cmra", "rdi", "id").
+		Select("link", "dataHash", "cmra", "rdi", "id", "source", "active").
 		Documents(ctx)
 
 	result := make(map[string]model.Mailbox)
@@ -246,6 +247,176 @@ func (r *MailboxRepository) StreamWithQuery(ctx context.Context, q MailboxQuery,
 			return err
 		}
 	}
+}
+
+// BulkSetActive marks multiple mailboxes as active or inactive (soft delete).
+// Used for mark-and-sweep deletion when records are no longer found at source.
+func (r *MailboxRepository) BulkSetActive(ctx context.Context, ids []string, active bool) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	const batchSize = 500
+	for start := 0; start < len(ids); start += batchSize {
+		end := start + batchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+
+		batch := r.client.Batch()
+		for _, id := range ids[start:end] {
+			ref := r.client.Collection("mailboxes").Doc(id)
+			batch.Update(ref, []firestore.Update{
+				{Path: "active", Value: active},
+			})
+		}
+
+		if _, err := batch.Commit(ctx); err != nil {
+			return fmt.Errorf("bulk set active [%d:%d]: %w", start, end, err)
+		}
+	}
+
+	return nil
+}
+
+// FetchByValidationStatus fetches mailboxes by validation status and optionally by priority.
+// Used by validation service to process pending queue.
+func (r *MailboxRepository) FetchByValidationStatus(ctx context.Context, status, priority string, limit int) ([]model.Mailbox, error) {
+	query := r.client.Collection("mailboxes").
+		Where("validationStatus", "==", status)
+
+	// Add priority filter if specified
+	if priority != "" {
+		query = query.Where("validationPriority", "==", priority)
+	}
+
+	// Removed OrderBy("nextRetryAt") because Firestore completely excludes documents 
+	// that do not have the OrderBy field from the result set. Since NextRetryAt is 
+	// omitempty, clean pending items lack this field and were being completely hidden!
+	// We also don't need to OrderBy validationPriority since we are often doing an exact match on it.
+
+	// Apply limit
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	iter := query.Documents(ctx)
+	var results []model.Mailbox
+
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return nil, fmt.Errorf("iterate mailboxes: %w", err)
+		}
+
+		var mb model.Mailbox
+		if err := doc.DataTo(&mb); err != nil {
+			return nil, fmt.Errorf("decode mailbox %s: %w", doc.Ref.ID, err)
+		}
+
+		if mb.ID == "" {
+			mb.ID = doc.Ref.ID
+		}
+
+		results = append(results, mb)
+	}
+
+	return results, nil
+}
+
+// UpdateValidationStatus updates validation-related fields for a single mailbox.
+// Used by validation service to update status after validation attempts.
+func (r *MailboxRepository) UpdateValidationStatus(
+	ctx context.Context,
+	id string,
+	status string,
+	priority string,
+	errorMsg string,
+	nextRetryAt time.Time,
+	attempts int,
+) error {
+	ref := r.client.Collection("mailboxes").Doc(id)
+
+	updates := []firestore.Update{
+		{Path: "validationStatus", Value: status},
+		{Path: "validationPriority", Value: priority},
+		{Path: "validationAttempts", Value: attempts},
+		{Path: "lastValidationAttempt", Value: time.Now()},
+	}
+
+	if errorMsg != "" {
+		updates = append(updates, firestore.Update{
+			Path: "lastValidationError", Value: errorMsg,
+		})
+	}
+
+	if !nextRetryAt.IsZero() {
+		updates = append(updates, firestore.Update{
+			Path: "nextRetryAt", Value: nextRetryAt,
+		})
+	}
+
+	_, err := ref.Update(ctx, updates)
+	if err != nil {
+		return fmt.Errorf("update validation status: %w", err)
+	}
+
+	return nil
+}
+
+// ValidationStats represents counts by validation status.
+type ValidationStats struct {
+	Pending         int `json:"pending"`
+	Validated       int `json:"validated"`
+	Failed          int `json:"failed"`
+	NeedsRevalidation int `json:"needsRevalidation"`
+	RetryScheduled  int `json:"retryScheduled"`
+	ManualReview    int `json:"manualReview"`
+	Total           int `json:"total"`
+}
+
+// GetValidationStats returns counts of mailboxes by validation status.
+// Used for dashboard metrics and monitoring.
+func (r *MailboxRepository) GetValidationStats(ctx context.Context) (ValidationStats, error) {
+	stats := ValidationStats{}
+
+	// Count by each status
+	statuses := []string{"pending", "validated", "failed", "needs_revalidation", "retry_scheduled", "manual_review"}
+
+	for _, status := range statuses {
+		query := r.client.Collection("mailboxes").Where("validationStatus", "==", status)
+		countQuery := query.NewAggregationQuery().WithCount("total")
+
+		result, err := countQuery.Get(ctx)
+		if err != nil {
+			return stats, fmt.Errorf("count %s: %w", status, err)
+		}
+
+		countValue := result["total"].(*firestorepb.Value)
+		count := int(countValue.GetIntegerValue())
+
+		switch status {
+		case "pending":
+			stats.Pending = count
+		case "validated":
+			stats.Validated = count
+		case "failed":
+			stats.Failed = count
+		case "needs_revalidation":
+			stats.NeedsRevalidation = count
+		case "retry_scheduled":
+			stats.RetryScheduled = count
+		case "manual_review":
+			stats.ManualReview = count
+		}
+
+		stats.Total += count
+	}
+
+	return stats, nil
 }
 
 func documentID(m model.Mailbox) string {

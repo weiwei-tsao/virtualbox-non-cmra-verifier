@@ -28,8 +28,14 @@ func (m mockFetcher) Fetch(ctx context.Context, url string) (io.ReadCloser, erro
 }
 
 type mockStore struct {
-	existing map[string]model.Mailbox
-	saved    []model.Mailbox
+	existing    map[string]model.Mailbox
+	saved       []model.Mailbox
+	activeCalls []bulkSetActiveCall
+}
+
+type bulkSetActiveCall struct {
+	ids    []string
+	active bool
 }
 
 func (m *mockStore) FetchAllMap(ctx context.Context) (map[string]model.Mailbox, error) {
@@ -43,6 +49,23 @@ func (m *mockStore) FetchAllMetadata(ctx context.Context) (map[string]model.Mail
 
 func (m *mockStore) BatchUpsert(ctx context.Context, mailboxes []model.Mailbox) error {
 	m.saved = append(m.saved, mailboxes...)
+	return nil
+}
+
+func (m *mockStore) BulkSetActive(ctx context.Context, ids []string, active bool) error {
+	copiedIDs := append([]string(nil), ids...)
+	m.activeCalls = append(m.activeCalls, bulkSetActiveCall{ids: copiedIDs, active: active})
+
+	// Mock implementation - update existing map
+	for _, id := range ids {
+		for link, mb := range m.existing {
+			if mb.ID == id {
+				mb.Active = active
+				m.existing[link] = mb
+				break
+			}
+		}
+	}
 	return nil
 }
 
@@ -86,7 +109,7 @@ func TestScrapeAndUpsert(t *testing.T) {
 		links[1]: sample,
 	}
 
-	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, nil, links, "RUN_1", nil, nil)
+	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, links, "ATMB", "RUN_1", nil, nil)
 	if err != nil {
 		t.Fatalf("ScrapeAndUpsert: %v", err)
 	}
@@ -108,5 +131,51 @@ func TestScrapeAndUpsert(t *testing.T) {
 	}
 	if saved.Link != links[1] {
 		t.Errorf("saved link = %q, want %q", saved.Link, links[1])
+	}
+}
+
+func TestScrapeAndUpsertReactivatesExistingInactiveLink(t *testing.T) {
+	link := "https://anytimemailbox.com/locations/reactivated-store"
+	store := &mockStore{
+		existing: map[string]model.Mailbox{
+			link: {
+				ID:     "reactivated-id",
+				Link:   link,
+				Source: "ATMB",
+				Active: false,
+			},
+		},
+	}
+
+	fetcher := mockFetcher{
+		perURL: map[string][]byte{
+			link: []byte("should not be fetched"),
+		},
+	}
+
+	stats, err := ScrapeAndUpsert(context.Background(), fetcher, store, []string{link}, "ATMB", "RUN_1", nil, nil)
+	if err != nil {
+		t.Fatalf("ScrapeAndUpsert: %v", err)
+	}
+
+	if stats.Found != 1 || stats.Skipped != 1 || stats.Updated != 0 || stats.Failed != 0 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if len(store.saved) != 0 {
+		t.Fatalf("expected no upsert for unchanged existing link, got %d", len(store.saved))
+	}
+	if len(store.activeCalls) != 1 {
+		t.Fatalf("activeCalls length = %d, want 1", len(store.activeCalls))
+	}
+
+	call := store.activeCalls[0]
+	if !call.active {
+		t.Fatal("BulkSetActive active = false, want true")
+	}
+	if len(call.ids) != 1 || call.ids[0] != "reactivated-id" {
+		t.Fatalf("BulkSetActive ids = %v, want [reactivated-id]", call.ids)
+	}
+	if !store.existing[link].Active {
+		t.Fatal("existing mailbox was not reactivated")
 	}
 }

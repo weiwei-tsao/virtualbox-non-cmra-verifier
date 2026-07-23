@@ -125,7 +125,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 		}
 	}
 
-	scrapeStats, err := ScrapeAndUpsert(ctx, s.fetcher, s.mailboxes, s.validator, links, runID, progress, func(msg string) {
+	scrapeStats, err := ScrapeAndUpsert(ctx, s.fetcher, s.mailboxes, links, "ATMB", runID, progress, func(msg string) {
 		log.Printf("run %s: %s", runID, msg)
 	})
 	if err != nil {
@@ -137,10 +137,7 @@ func (s *Service) execute(ctx context.Context, runID string, links []string, sta
 	stats.Validated = scrapeStats.Validated
 	stats.Failed = scrapeStats.Failed
 
-	if err := MarkAndSweep(ctx, s.mailboxes, runID, "ATMB"); err != nil {
-		status = "partial_halt"
-		log.Printf("mark and sweep error run %s: %v", runID, err)
-	}
+	// Mark-and-sweep now happens inside ScrapeAndUpsert (aggressive scraping strategy)
 
 	// If nothing was processed successfully, mark as failed.
 	if stats.Validated == 0 && stats.Skipped == 0 && stats.Found > 0 && stats.Failed >= stats.Found {
@@ -323,11 +320,7 @@ func (s *Service) executeIPost1(ctx context.Context, runID string, startedAt tim
 	stats.Skipped = ipostStats.Skipped
 	stats.Failed = ipostStats.Failed
 
-	// Mark and sweep for iPost1 source only
-	if err := MarkAndSweep(ctx, s.mailboxes, runID, "iPost1"); err != nil {
-		status = "partial_halt"
-		log.Printf("mark and sweep error run %s: %v", runID, err)
-	}
+	// Mark-and-sweep now happens inside ProcessAndValidate (aggressive scraping strategy)
 
 	// If nothing was processed successfully, mark as failed
 	if stats.Validated == 0 && stats.Skipped == 0 && stats.Found > 0 && stats.Failed >= stats.Found {
@@ -373,7 +366,7 @@ func (s *Service) executeIPost1Discovery(ctx context.Context, runID string) (IPo
 	}, nil
 }
 
-// runIPost1ProcessAndValidate executes the iPost1 discovery and validation process.
+// runIPost1ProcessAndValidate executes the iPost1 discovery process.
 // This method acts as an adapter between the Service and the ipost1 package.
 func (s *Service) runIPost1ProcessAndValidate(ctx context.Context, runID string) (struct {
 	Found     int
@@ -384,7 +377,6 @@ func (s *Service) runIPost1ProcessAndValidate(ctx context.Context, runID string)
 	// Call iPost1 ProcessAndValidate with proper adapters
 	stats, err := ipost1.ProcessAndValidate(
 		ctx,
-		s.validator, // Already implements the ValidationClient interface
 		s.mailboxes, // Already implements the MailboxStore interface
 		runID,
 		func(msg string) {
